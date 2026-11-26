@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!doctype html>
 <html lang="en">
 <head>
@@ -512,8 +511,60 @@ async function downloadFile(name, text){
     return false;
   }
 }
-function toCSV(rows){ return rows.map(r=>r.map(v=>{ const s=String(v??""); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\n"); }
+function toCSV(rows){ return rows.map(r=>r.map(v=>{ let s=String(v??""); if (/^[=+\-@\t\r]/.test(s)) s = "'"+s; return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\n"); }
 function emptyState(ic, msg){ return `<div class="empty">${icon(ic)}<div>${esc(msg)}</div></div>`; }
+/* URL allow-list for anything that comes from the database.
+   kind "img"   : <img src>   — https:, local blob:, data:image/*
+   kind "media" : <video src> — https:, local blob:, data:image/*, data:video/*
+   kind "href"  : links       — https:, local blob:, data:image/(png|jpeg|gif|webp)
+   Anything else (javascript:, http:, other data: types) returns "". */
+const LOCAL_BLOBS = new Set();
+function localBlobUrl(file){ const u = URL.createObjectURL(file); LOCAL_BLOBS.add(u); return u; }
+function revokeLocalBlob(u){ if (u && LOCAL_BLOBS.has(u)){ URL.revokeObjectURL(u); LOCAL_BLOBS.delete(u); } }
+function safeUrl(u, kind){
+  const s = String(u??"").trim(); if (!s) return "";
+  if (/^https:\/\//i.test(s)){ try{ new URL(s); return s; }catch(e){ return ""; } }
+  if (/^blob:/i.test(s)) return LOCAL_BLOBS.has(s) ? s : "";
+  if (kind==="href") return /^data:image\/(png|jpeg|gif|webp)[;,]/i.test(s) ? s : "";
+  if (/^data:image\//i.test(s)) return s;
+  if (kind==="media" && /^data:video\//i.test(s)) return s;
+  return "";
+}
+/* Busy guards: ignore repeat clicks/submits while an async save is running. */
+function withBusy(btns, fn){
+  const list = (Array.isArray(btns) ? btns : [btns]).filter(Boolean);
+  return async (...a)=>{
+    if (!list.length || list[0].dataset.busy) return;
+    list.forEach(b=>{ b.dataset.busy = "1"; b.disabled = true; });
+    try{ return await fn(...a); }
+    catch(e){ console.error(e); toast("Something went wrong. Check the result before trying again.", "bad"); }
+    finally{ list.forEach(b=>{ delete b.dataset.busy; b.disabled = false; }); }
+  };
+}
+function onSubmit(form, fn){
+  form.addEventListener("submit", async e=>{
+    e.preventDefault();
+    if (form.dataset.busy) return;
+    const btns = $$("button:not([type=button])", form);
+    form.dataset.busy = "1"; btns.forEach(b=>b.disabled = true);
+    try{ await fn(e); }
+    catch(err){ console.error(err); toast("Something went wrong. Check the result before trying again.", "bad"); }
+    finally{ delete form.dataset.busy; btns.forEach(b=>b.disabled = false); }
+  });
+}
+const ACTIVE_KEYS = new Set();
+async function once(key, fn){ if (ACTIVE_KEYS.has(key)) return; ACTIVE_KEYS.add(key); try{ return await fn(); } finally{ ACTIVE_KEYS.delete(key); } }
+/* Strict number check: plain decimal only (no hex, exponent, Infinity). */
+function parseNum(v, allowNeg){
+  const s = String(v??"").trim();
+  if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(s)) return null;
+  const n = Number(s); if (!Number.isFinite(n)) return null;
+  if (n<0 && !allowNeg) return null;
+  return n;
+}
+const SAFE_ID = /^[\w-]+$/;
+const firstName = n=> String(n||"").trim().split(/\s+/)[0] || "";
+const validDate = v=> { const d = new Date(v); return isNaN(d.getTime()) ? null : d; };
 
 /* ------------------------------ DATA LAYER ------------------------------ */
 /* In-memory store with the same API as the shared db. Used only when shared
@@ -559,7 +610,7 @@ let S = {
     gpsPolicy:{enabled:false, scope:"Company service area only", activeJobOnly:true, notes:"Location is off. When turned on, it is only visible while a technician is actively on a scheduled job — never outside job hours, never as background tracking."} },
   users:[], customers:[], equipment:[], jobs:[], feedback:[], notifications:[], consent:[], hazards:[],
   jobSub:{},
-  role:"technician", userId:null,
+  role:"technician", userId:null, loadErrors:[], configExists:false,
   view:{tab:"dashboard", jobId:null, jobTab:"overview", equipmentId:null, customerId:null},
   ui:{boardMode:"board", archive:{q:"",from:"",to:"",tech:"",type:""}, expenseFilter:"pending", settingsTab:"company", eqQ:"", custQ:"", auditQ:""},
 };
@@ -575,29 +626,36 @@ async function boot(){
     mode = "live";
     const ok = await loadAll();
     if (!ok){ db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll(); }
-    else if (!S.config.seedVersion && !S.hazards.length && S.jobs.every(j=>/^JOB-100[1-5]$/.test(j.refNumber||""))){
-      /* The shared store still holds only the original example records: refresh them once to the fuller example set. */
+    else if (!S.loadErrors.length && S.configExists && S.jobs.length>0 && !S.config.seedVersion && !S.hazards.length && S.jobs.every(j=>/^JOB-100[1-5]$/.test(j.refNumber||""))){
+      /* The shared store still holds only the original example records: refresh them once to the fuller example set.
+         Only runs when every read succeeded and real job records were actually read. */
       $("#main").innerHTML = `<div class="card">${emptyState("sparkle","Setting up the example data…")}</div>`;
       try{ await seedPreview(); await loadAll(); }catch(e){ console.error("example refresh failed", e); }
     }
   } else {
     db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll();
   }
-  const savedRole = lsGet("sr_role");
-  setRole(ROLE_LABELS[savedRole] ? savedRole : "technician", true);
+  restoreUser();
 }
 
 async function loadAll(){
+  const errors = [];
+  const tryGet = (label, p)=> p.then(r=>r, e=>{ console.error("read failed", label, e); errors.push(label); return null; });
+  const keepSafe = docs=> docs.filter(d=>SAFE_ID.test(String(d.id)));
   try{
     const cfg = await db.doc("app/config").get();
+    S.configExists = !!cfg.exists;
     if (cfg.exists){ const c = cfg.data(); S.config = Object.assign({}, S.config, c, {modules:Object.assign({}, S.config.modules, c.modules||{}), gpsPolicy:Object.assign({}, S.config.gpsPolicy, c.gpsPolicy||{})}); }
     const names = ["users","customers","equipment","jobs","feedback","consent","hazards"];
-    const snaps = await Promise.all(names.map(n=>db.collection(n).get().catch(()=>({docs:[]}))));
-    names.forEach((n,i)=> S[n] = snaps[i].docs.map(d=>Object.assign({id:d.id}, d.data())));
-    const ns = await db.collection("notifications").orderBy("at","desc").limit(100).get().catch(()=>({docs:[]}));
-    S.notifications = ns.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    const snaps = await Promise.all(names.map(n=>tryGet(n, db.collection(n).get())));
+    /* A failed read keeps what was already loaded instead of replacing it with an empty list. */
+    names.forEach((n,i)=>{ if (snaps[i]) S[n] = keepSafe(snaps[i].docs).map(d=>Object.assign({id:d.id}, d.data())); });
+    const ns = await tryGet("notifications", db.collection("notifications").orderBy("at","desc").limit(100).get());
+    if (ns) S.notifications = keepSafe(ns.docs).map(d=>Object.assign({id:d.id}, d.data()));
     S.users.forEach(normalizeUser);
-    await Promise.all(S.jobs.map(j=>loadJobSub(j.id)));
+    const subOk = await Promise.all(S.jobs.map(j=>loadJobSub(j.id)));
+    if (subOk.some(x=>!x)) errors.push("job details");
+    S.loadErrors = errors;
     return true;
   }catch(e){ console.error("loadAll failed", e); return false; }
 }
@@ -609,39 +667,73 @@ async function loadJobSub(jobId){
   if (!S.jobSub[jobId]) S.jobSub[jobId] = emptySub();
   try{
     const jd = db.doc("jobs/"+jobId);
-    const snaps = await Promise.all(SUB.map(n=> jd.collection(n).orderBy("at", n==="events"?"asc":"desc").get().catch(()=>({docs:[]}))));
-    const sub = emptySub();
-    SUB.forEach((n,i)=> sub[n] = snaps[i].docs.map(d=>Object.assign({id:d.id}, d.data())));
+    let failed = false;
+    const snaps = await Promise.all(SUB.map(n=> jd.collection(n).orderBy("at", n==="events"?"asc":"desc").get().catch(e=>{ console.error("read failed", jobId, n, e); failed = true; return null; })));
+    const prev = S.jobSub[jobId]; const sub = emptySub();
+    SUB.forEach((n,i)=> sub[n] = snaps[i] ? snaps[i].docs.filter(d=>SAFE_ID.test(String(d.id))).map(d=>Object.assign({id:d.id}, d.data())) : prev[n]);
     S.jobSub[jobId] = sub;
-  }catch(e){ console.error("loadJobSub", e); }
+    return !failed;
+  }catch(e){ console.error("loadJobSub", e); return false; }
 }
+/* merge=true uses update() (doc must exist). No fallback to set(): a failed update must never replace the whole document. */
 async function writeDoc(path, data, merge){
   try{
     if (merge) await db.doc(path).update(data); else await db.doc(path).set(data);
     return true;
   }catch(e){
-    if (merge){ try{ await db.doc(path).set(data); return true; }catch(e2){ console.error(e2); } }
     console.error("write failed", path, e); toast("Couldn't save — check your connection and try again.", "bad"); return false;
   }
 }
-async function addDoc(colPath, data){
-  try{ const ref = await db.collection(colPath).add(data); return ref.id; }
-  catch(e){ console.error("add failed", colPath, e); toast("Couldn't save — check your connection and try again.", "bad"); return null; }
+/* Settings: update only the changed fields. If the config doc doesn't exist yet, read it and set the merged object. */
+async function writeConfig(patch){
+  try{
+    const ref = db.doc("app/config"); const snap = await ref.get();
+    if (snap.exists) await ref.update(patch);
+    else await ref.set(Object.assign({}, S.config, patch));
+    S.configExists = true;
+    return true;
+  }catch(e){ console.error("config write failed", e); toast("Couldn't save — check your connection and try again.", "bad"); return false; }
 }
+async function addDoc(colPath, data, failMsg){
+  try{ const ref = await db.collection(colPath).add(data); if (!ref || !ref.id) throw new Error("no id returned"); return ref.id; }
+  catch(e){ console.error("add failed", colPath, e); toast(failMsg || "Couldn't save — check your connection and try again.", "bad"); return null; }
+}
+const MAX_INLINE = 700*1024;
+function fileProblem(file){
+  const t = String(file.type||"").toLowerCase();
+  const isVid = t.startsWith("video/");
+  if (!(t.startsWith("image/") || isVid || t==="application/pdf")) return `“${file.name}” isn't a photo, video or PDF.`;
+  const lim = isVid ? 50*1048576 : 10*1048576;
+  if (file.size > lim) return `“${file.name}” is too big (limit ${lim/1048576} MB).`;
+  return null;
+}
+/* Returns {url, assetId} or null (and shows the error). Never stores blob: URLs; never inlines files over ~700 KB. */
 async function uploadFile(file){
-  if (assets){ try{ const up = await assets.upload(file); return {url:up.url, assetId:up.id}; }catch(e){ console.error(e); } }
-  const url = await new Promise(res=>{ const r = new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>res(URL.createObjectURL(file)); r.readAsDataURL(file); });
-  return {url, assetId:null};
+  const bad = fileProblem(file); if (bad){ toast(bad, "bad"); return null; }
+  let assetErr = null;
+  if (assets){
+    try{ const up = await assets.upload(file); if (up && safeUrl(up.url, "media") && !/^blob:/i.test(up.url)) return {url:up.url, assetId:up.id||null}; throw new Error("upload returned no usable URL"); }
+    catch(e){ console.error(e); assetErr = e; }
+  }
+  if (file.size > MAX_INLINE){ toast(`Couldn't upload “${file.name}”.${assetErr?" The file service failed, and":""} Files over 700 KB can't be stored without the file service.`, "bad"); return null; }
+  try{
+    const url = await new Promise((res, rej)=>{ const r = new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error||new Error("read failed")); r.readAsDataURL(file); });
+    return {url, assetId:null};
+  }catch(e){ console.error(e); toast(`Couldn't read “${file.name}”.`, "bad"); return null; }
 }
 async function logEvent(jobId, type, extra){
   const rec = Object.assign({type, at:now(), by:me()?.name||ROLE_LABELS[S.role], byId:me()?.id||null}, extra||{});
-  const id = await addDoc("jobs/"+jobId+"/events", rec);
-  (S.jobSub[jobId] = S.jobSub[jobId]||emptySub()).events.push(Object.assign({id:id||uid("ev")}, rec));
+  const id = await addDoc("jobs/"+jobId+"/events", rec, "Saved, but the timeline entry couldn't be recorded.");
+  if (!id) return false;
+  (S.jobSub[jobId] = S.jobSub[jobId]||emptySub()).events.push(Object.assign({id}, rec));
+  return true;
 }
 async function notify(message, target){
   const rec = Object.assign({message, at:now(), readBy:[], fromId:me()?.id||null}, target||{});
-  const id = await addDoc("notifications", rec);
-  S.notifications.unshift(Object.assign({id:id||uid("n")}, rec));
+  const id = await addDoc("notifications", rec, "Saved, but the notification couldn't be sent.");
+  if (!id) return false;
+  S.notifications.unshift(Object.assign({id}, rec));
+  return true;
 }
 
 /* ------------------------------ LOOKUPS & PERMISSIONS ------------------------------ */
@@ -721,19 +813,48 @@ function navCount(key){
   if (key==="dashboard" && isField()) return visibleJobs().filter(j=>!isClosed(j)).reduce((n,j)=>n+jobUnseen(j.id),0);
   return 0;
 }
-function setRole(role, silent){
-  S.role = role; lsSet("sr_role", role);
-  const u = activeUsers().find(x=>x.role===role);
-  S.userId = u ? u.id : null;
+/* "Viewing as" picks a specific person. The role always comes from that person's record. */
+const pickableUsers = ()=> activeUsers().filter(u=>ROLE_LABELS[u.role]).sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+function userOptions(){
+  const list = pickableUsers();
+  if (!list.length) return `<option value="">No active team members</option>`;
+  return (S.userId && list.some(u=>u.id===S.userId) ? "" : `<option value="" selected disabled>Choose a person…</option>`)
+    + list.map(u=>`<option value="${esc(u.id)}" ${S.userId===u.id?"selected":""}>${esc(u.name||"(no name)")} — ${esc(ROLE_LABELS[u.role])}</option>`).join("");
+}
+function setUser(userId, silent){
+  const u = pickableUsers().find(x=>x.id===userId);
+  if (!u) return false;
+  S.userId = u.id; S.role = u.role;
+  lsSet("sr_user", u.id); lsSet("sr_role", u.role);
   S.view = {tab:"dashboard", jobId:null, jobTab:"overview", equipmentId:null, customerId:null};
   render();
-  if (!silent) toast(`Now viewing as ${u?u.name:ROLE_LABELS[role]} (${ROLE_LABELS[role]}).`);
+  if (!silent) toast(`Now viewing as ${u.name} (${ROLE_LABELS[u.role]}).`);
+  return true;
+}
+function restoreUser(){
+  const list = pickableUsers();
+  const savedRole = lsGet("sr_role"); /* older versions stored only the role */
+  const u = list.find(x=>x.id===lsGet("sr_user")) || list.find(x=>x.role===savedRole) || list.find(x=>x.role==="technician") || list[0];
+  if (u && setUser(u.id, true)) return;
+  S.userId = null; S.role = "technician"; render();
 }
 function go(tab){ S.view = {tab, jobId:null, jobTab:"overview", equipmentId:null, customerId:null}; closeOverlay(); render(); window.scrollTo(0,0); }
 function openJob(id, tab){
   const j = jobById(id); if (!j) return;
   S.view.jobId = id; S.view.jobTab = tab||"overview"; closeOverlay(); render(); window.scrollTo(0,0);
-  loadJobSub(id).then(()=>{ if (S.view.jobId===id) render(); });
+  loadJobSub(id).then(()=>{
+    if (S.view.jobId!==id) return;
+    /* Don't wipe what the user has started typing: skip the main re-render while a field has unsaved text. */
+    if (hasDraft($("#main"))){ renderSide(); renderTabbar(); return; }
+    render();
+  });
+}
+function hasDraft(root){
+  return !!root && $$("input,textarea", root).some(f=>{
+    if (f.disabled || f.type==="file" || f.type==="hidden") return false;
+    if (f.type==="checkbox" || f.type==="radio") return f.checked!==f.defaultChecked;
+    return f.value!==f.defaultValue;
+  });
 }
 function openEquipment(id){ S.view = {tab:"equipment", jobId:null, jobTab:"overview", equipmentId:id, customerId:null}; closeOverlay(); render(); window.scrollTo(0,0); }
 function openCustomer(id){ S.view = {tab:"customers", jobId:null, jobTab:"overview", equipmentId:null, customerId:id}; closeOverlay(); render(); window.scrollTo(0,0); }
@@ -761,8 +882,8 @@ function renderSide(){
     <div class="navlist" role="list"></div>
     <div class="rolecard">
       <label for="roleSel">Viewing as (prototype)</label>
-      <select id="roleSel">${Object.entries(ROLE_LABELS).map(([k,v])=>`<option value="${k}" ${S.role===k?"selected":""}>${esc(v)}</option>`).join("")}</select>
-      <div class="who">${avatar(u)}<div><div class="nm">${esc(u?.name||"No user for this role")}</div><div class="rl">${esc(ROLE_LABELS[S.role])}</div></div></div>
+      <select id="roleSel">${userOptions()}</select>
+      <div class="who">${avatar(u)}<div><div class="nm">${esc(u?.name||"No person chosen")}</div><div class="rl">${esc(ROLE_LABELS[S.role])}</div></div></div>
     </div>`;
   const list = $(".navlist", side);
   navFor(S.role).forEach(([k,label,ic])=>{
@@ -770,7 +891,7 @@ function renderSide(){
     const b = el(`<button class="${S.view.tab===k && !S.view.jobId?"active":""}">${icon(ic)}<span>${esc(label)}</span>${n?`<span class="count">${n}</span>`:""}</button>`);
     b.addEventListener("click", ()=>go(k)); list.appendChild(b);
   });
-  $("#roleSel", side).addEventListener("change", e=>setRole(e.target.value));
+  $("#roleSel", side).addEventListener("change", e=>setUser(e.target.value));
 }
 function renderTop(){
   const top = $("#top"); const unread = unreadCount();
@@ -797,6 +918,7 @@ function goBack(){
 function renderBanner(){
   const b = $("#banner");
   if (mode==="preview"){ b.hidden=false; b.innerHTML = `${icon("eye","sm")}<span><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span>`; }
+  else if (S.loadErrors.length){ b.hidden=false; b.innerHTML = `${icon("alert","sm")}<span><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span>`; }
   else b.hidden = true;
 }
 function renderTabbar(){
@@ -815,12 +937,12 @@ function openMoreSheet(rest){
   const body = el(`<div><div class="mh"><h3>More</h3><button class="btn ghost sm" data-close>${icon("x")}</button></div>
     <div class="stack tight" id="moreList"></div>
     <hr class="sep">
-    <div class="field"><label>Viewing as (prototype)</label><select id="roleSel2">${Object.entries(ROLE_LABELS).map(([k,v])=>`<option value="${k}" ${S.role===k?"selected":""}>${esc(v)}</option>`).join("")}</select></div>
+    <div class="field"><label>Viewing as (prototype)</label><select id="roleSel2">${userOptions()}</select></div>
   </div>`);
   const list = $("#moreList", body);
   if (!rest.length) list.appendChild(el(`<div class="hint">Everything for this role is in the bar below.</div>`));
   rest.forEach(([k,label,ic])=>{ const n = navCount(k); const b = el(`<button class="btn block" style="justify-content:flex-start">${icon(ic)} ${esc(label)}${n?`<span class="count">${n}</span>`:""}</button>`); b.addEventListener("click", ()=>go(k)); list.appendChild(b); });
-  $("#roleSel2", body).addEventListener("change", e=>{ closeOverlay(); setRole(e.target.value); });
+  $("#roleSel2", body).addEventListener("change", e=>{ closeOverlay(); setUser(e.target.value); });
   showModal(body, {sheet:true});
 }
 function renderMain(){
@@ -847,29 +969,50 @@ function showModal(node, opts){
   const ov = el(`<div class="overlay ${opts.sheet?"sheet":""}" role="dialog" aria-modal="true"></div>`);
   const box = el(`<div class="modal ${opts.wide?"wide":""}"></div>`);
   box.appendChild(node); ov.appendChild(box);
-  ov.addEventListener("click", e=>{ if (e.target===ov) closeOverlay(); });
+  /* Track real user edits so Esc / backdrop click can ask before throwing them away. */
+  let dirty = false; const mark = e=>{ if (e.isTrusted) dirty = true; };
+  node.addEventListener("input", mark); node.addEventListener("change", mark);
+  node.addEventListener("pointerdown", e=>{ if (e.isTrusted && e.target.tagName==="CANVAS") dirty = true; });
+  ov._isDirty = ()=> dirty;
+  ov.addEventListener("click", e=>{ if (e.target===ov) requestClose(); });
   $$("[data-close]", node).forEach(b=>b.addEventListener("click", closeOverlay));
   $("#overlays").innerHTML = ""; $("#overlays").appendChild(ov);
   setTimeout(()=>{ const f = node.querySelector("input:not([type=checkbox]):not([type=file]),select,textarea"); if (f && !opts.noFocus) f.focus(); }, 30);
   return ov;
 }
 function closeOverlay(){ $("#overlays").innerHTML = ""; }
+/* Esc / backdrop: close the top layer; ask first if a form in it was changed. */
+async function requestClose(){
+  const layers = $("#overlays").children; const top = layers[layers.length-1];
+  if (!top) return;
+  if (top._cancel){ top._cancel(); return; }
+  if (top._isDirty && top._isDirty() && !(await confirmBox("Discard changes?", "You changed this form and haven't saved it. Close it and lose the changes?", "Discard", true))) return;
+  closeOverlay();
+}
 document.addEventListener("keydown", e=>{
-  if (e.key==="Escape") closeOverlay();
+  if (e.key==="Escape") requestClose();
   if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="k"){ e.preventDefault(); openPalette(); }
 });
 function modalHead(title, sub){ return `<div class="mh"><div><h3>${esc(title)}</h3>${sub?`<div class="hint">${esc(sub)}</div>`:""}</div><button class="btn ghost sm" type="button" data-close aria-label="Close">${icon("x")}</button></div>`; }
+/* Stacks on top of any open modal, and removes only itself — the form underneath stays filled in. */
 function confirmBox(title, msg, okLabel, danger){
   return new Promise(res=>{
     const b = el(`<div>${modalHead(title)}<p>${esc(msg)}</p><div class="mf"><button class="btn" data-no>Cancel</button><button class="btn ${danger?"danger solid":"primary"}" data-yes>${esc(okLabel||"Confirm")}</button></div></div>`);
-    showModal(b, {noFocus:true});
-    $("[data-no]", b).addEventListener("click", ()=>{ closeOverlay(); res(false); });
-    $("[data-yes]", b).addEventListener("click", ()=>{ closeOverlay(); res(true); });
+    const ov = el(`<div class="overlay" role="dialog" aria-modal="true"></div>`); const box = el(`<div class="modal"></div>`);
+    box.appendChild(b); ov.appendChild(box);
+    let done = false; const finish = v=>{ if (done) return; done = true; ov.remove(); res(v); };
+    ov._cancel = ()=>finish(false);
+    ov.addEventListener("click", e=>{ if (e.target===ov) finish(false); });
+    $$("[data-close]", b).forEach(x=>x.addEventListener("click", ()=>finish(false)));
+    $("[data-no]", b).addEventListener("click", ()=>finish(false));
+    $("[data-yes]", b).addEventListener("click", ()=>finish(true));
+    $("#overlays").appendChild(ov);
   });
 }
 function openLightbox(m){
   const isVid = (m.contentType||"").startsWith("video");
-  const ov = el(`<div class="overlay"><div class="lightbox stack">${isVid?`<video src="${esc(m.url)}" controls autoplay></video>`:`<img src="${esc(m.url)}" alt="${esc(m.category||"photo")}">`}
+  const src = safeUrl(m.url, isVid?"media":"img");
+  const ov = el(`<div class="overlay"><div class="lightbox stack">${!src?`<div class="card">${emptyState("image","This file can't be shown.")}</div>`:isVid?`<video src="${esc(src)}" controls autoplay></video>`:`<img src="${esc(src)}" alt="${esc(m.category||"photo")}">`}
     <div class="row between" style="color:#fff"><span>${esc(m.category||"Photo")}${m.caption?" — "+esc(m.caption):""}</span><span class="small">${esc(m.by||"")} · ${esc(fmtDate(m.at))}</span></div></div></div>`);
   ov.addEventListener("click", closeOverlay);
   $("#overlays").innerHTML=""; $("#overlays").appendChild(ov);
@@ -892,12 +1035,11 @@ function openNotifications(){
   $("#markAll", d).addEventListener("click", ()=>{ markRead(list.filter(n=>!isRead(n))); closeOverlay(); render(); });
   $("#overlays").innerHTML=""; $("#overlays").appendChild(ov);
 }
-function markRead(items){
-  items.forEach(n=>{
-    if (isRead(n)) return;
-    n.readBy = (n.readBy||[]).concat(S.userId||"anon");
-    writeDoc("notifications/"+n.id, {readBy:n.readBy}, true);
-  });
+async function markRead(items){
+  await Promise.all(items.filter(n=>!isRead(n)).map(async n=>{
+    const readBy = (n.readBy||[]).concat(S.userId||"anon");
+    if (await writeDoc("notifications/"+n.id, {readBy}, true)) n.readBy = readBy;
+  }));
   renderTop();
 }
 
@@ -949,7 +1091,7 @@ function jobCard(j){
     <div class="t1"><span class="ref">${esc(j.refNumber)}</span><span class="row">${n?`<span class="count" title="New activity">${n} new</span>`:""}${statusPill(j.status)}</span></div>
     <div><div class="cust">${esc(c?.name||"No customer")}</div><div class="addr">${icon("pin","sm")}<span>${esc(j.siteAddress||"")}</span></div></div>
     <div class="row wrap">${prioPill(j.priority)}<span class="pill nodot slate">${esc(cap(j.jobType))}</span>${isLate(j)?`<span class="pill bad">Late</span>`:""}${hz?`<span class="pill bad">${icon("tag","sm")} Red tag</span>`:""}</div>
-    <div class="t3"><span class="row small dim">${icon("clock","sm")} ${esc(fmtDate(j.scheduledAt))}</span><span class="row small">${t?avatar(t,"sm")+`<span class="dim">${esc(t.name.split(" ")[0])}</span>`:`<span class="pill warn">Unassigned</span>`}</span></div>
+    <div class="t3"><span class="row small dim">${icon("clock","sm")} ${esc(fmtDate(j.scheduledAt))}</span><span class="row small">${t?avatar(t,"sm")+`<span class="dim">${esc(firstName(t.name))}</span>`:`<span class="pill warn">Unassigned</span>`}</span></div>
   </div>`);
   card.addEventListener("click", ()=>openJob(j.id));
   card.addEventListener("keydown", e=>{ if (e.key==="Enter") openJob(j.id); });
@@ -997,7 +1139,7 @@ function dashField(){
 
   const hero = el(`<div class="hero">
     <div class="eyebrow">${esc(new Date().toLocaleDateString(undefined,{weekday:"long", month:"long", day:"numeric"}))}</div>
-    <h1 style="margin-top:6px">${greeting()}, ${esc(u.name.split(" ")[0])}</h1>
+    <h1 style="margin-top:6px">${greeting()}, ${esc(firstName(u.name))}</h1>
     <div class="dim" style="margin-top:4px">${mine.length ? `You have ${mine.length} open job${mine.length>1?"s":""}${today.length?`, ${today.length} for today`:""}.` : "No open jobs assigned to you right now."}</div>
     <div id="nextJob" style="margin-top:16px"></div>
   </div>`);
@@ -1008,20 +1150,20 @@ function dashField(){
       <div style="font-weight:800;font-size:18px;margin-top:3px">${esc(c?.name||"")}</div><div class="dim small">${esc(next.siteAddress)} · ${esc(cap(next.jobType))}</div></div>${statusPill(next.status)}</div>
       <div class="actionbar" style="margin-top:12px">
         <button class="btn primary" id="nxOpen">${icon("chev","sm")} Open job</button>
-        <a class="btn" href="${esc(mapsUrl(next.siteAddress))}" target="_blank" rel="noopener">${icon("nav","sm")} Navigate</a>
+        <a class="btn" href="${esc(mapsUrl(next.siteAddress))}" target="_blank" rel="noopener noreferrer">${icon("nav","sm")} Navigate</a>
         ${c?.phone?`<a class="btn" href="tel:${esc(c.phone)}">${icon("phone","sm")} Call</a>`:""}
         ${can.advance(next)?`<button class="btn go" id="nxAdv">${esc(STATUS[next.status].next)}</button>`:""}
       </div></div>`);
     $("#nxOpen", nj).addEventListener("click", ()=>openJob(next.id));
-    $("#nxAdv", nj)?.addEventListener("click", ()=>advanceJob(next));
+    { const nb = $("#nxAdv", nj); nb?.addEventListener("click", withBusy(nb, ()=>advanceJob(next))); }
     $("#nextJob", hero).appendChild(nj);
   }
   wrap.appendChild(hero);
 
   const alerts = [];
-  sentBack.forEach(j=> alerts.push(`<div class="callout bad" data-job="${j.id}" style="cursor:pointer">${icon("undo")}<div><b>${esc(j.refNumber)} was sent back by ${esc(j.review.by)}.</b><div>${esc(j.review.reason||"")}</div></div></div>`));
-  clarify.forEach(x=> alerts.push(`<div class="callout warn" data-job="${x.job.id}" data-tab="materials" style="cursor:pointer">${icon("receipt")}<div><b>Accounting has a question about “${esc(x.item.description)}” on ${esc(x.job.refNumber)}.</b><div>${esc(x.item.clarifyMsg||"")}</div></div></div>`));
-  answered.forEach(h=> alerts.push(`<div class="callout ok" data-job="${h.job.id}" style="cursor:pointer">${icon("lifebuoy")}<div><b>Supervisor answered your help request on ${esc(h.job.refNumber)}.</b><div>${esc(h.response||"")}</div></div></div>`));
+  sentBack.forEach(j=> alerts.push(`<div class="callout bad" data-job="${esc(j.id)}" style="cursor:pointer">${icon("undo")}<div><b>${esc(j.refNumber)} was sent back by ${esc(j.review.by)}.</b><div>${esc(j.review.reason||"")}</div></div></div>`));
+  clarify.forEach(x=> alerts.push(`<div class="callout warn" data-job="${esc(x.job.id)}" data-tab="materials" style="cursor:pointer">${icon("receipt")}<div><b>Accounting has a question about “${esc(x.item.description)}” on ${esc(x.job.refNumber)}.</b><div>${esc(x.item.clarifyMsg||"")}</div></div></div>`));
+  answered.forEach(h=> alerts.push(`<div class="callout ok" data-job="${esc(h.job.id)}" style="cursor:pointer">${icon("lifebuoy")}<div><b>Supervisor answered your help request on ${esc(h.job.refNumber)}.</b><div>${esc(h.response||"")}</div></div></div>`));
   if (alerts.length){
     const a = el(`<div class="stack mt">${alerts.join("")}</div>`);
     $$("[data-job]", a).forEach(n=> n.addEventListener("click", ()=>openJob(n.dataset.job, n.dataset.tab)));
@@ -1092,7 +1234,7 @@ function dashOwner(){
   const open = S.jobs.filter(j=>!isClosed(j));
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
   const closedMonth = S.jobs.filter(j=>isClosed(j) && ts(j.closedAt||j.scheduledAt)>=monthStart.getTime());
-  wrap.appendChild(el(`<div class="hero"><div class="eyebrow">${esc(S.config.companyName||"Company")}</div><h1 style="margin-top:6px">${greeting()}${me()?", "+esc(me().name.split(" ")[0]):""}</h1><div class="dim" style="margin-top:4px">Here's where the business stands today.</div></div>`));
+  wrap.appendChild(el(`<div class="hero"><div class="eyebrow">${esc(S.config.companyName||"Company")}</div><h1 style="margin-top:6px">${greeting()}${me()?", "+esc(firstName(me().name)):""}</h1><div class="dim" style="margin-top:4px">Here's where the business stands today.</div></div>`));
   wrap.appendChild(el(`<div class="grid g4 mt">${kpi("Open jobs", open.length, "wrench")}${kpi("Closed this month", closedMonth.length, "checkcircle")}${kpi("Awaiting review", open.filter(j=>j.status==="completion_review").length, "clipboard")}${kpi("Open red tags", openHazards().length, "tag","",openHazards().length>0)}</div>`));
   const g = el(`<div class="grid g-main mt2"><div class="card"><div class="card-h"><h3>Needs attention</h3></div><div id="al"></div></div><div class="card"><div class="card-h"><h3>Recent activity</h3></div><div id="act"></div></div></div>`);
   const al = $("#al", g); const alerts = ownerAlerts();
@@ -1154,9 +1296,9 @@ function renderDispatch(){
     board.style.gridTemplateColumns = "repeat(5,minmax(230px,1fr))";
     wrap.appendChild(board);
   } else if (S.ui.boardMode==="days"){
-    const days = {}; open.forEach(j=>{ const k = new Date(j.scheduledAt).toDateString(); (days[k]=days[k]||[]).push(j); });
+    const days = new Map(); open.forEach(j=>{ const d = validDate(j.scheduledAt); const k = d ? d.toDateString() : ""; if (!days.has(k)) days.set(k, []); days.get(k).push(j); });
     if (!open.length) wrap.appendChild(el(`<div class="card">${emptyState("calendar","Nothing scheduled.")}</div>`));
-    Object.entries(days).forEach(([k,list])=>{ wrap.appendChild(el(`<h3 class="mt" style="margin-bottom:10px">${esc(fmtDay(new Date(k).toISOString()))} <span class="faint small">${list.length} job(s)</span></h3>`)); wrap.appendChild(jobGrid(list)); });
+    days.forEach((list,k)=>{ wrap.appendChild(el(`<h3 class="mt" style="margin-bottom:10px">${esc(k ? fmtDay(new Date(k).toISOString()) : "No valid date")} <span class="faint small">${list.length} job(s)</span></h3>`)); wrap.appendChild(jobGrid(list)); });
   } else wrap.appendChild(jobTable(open, "No open jobs."));
   return wrap;
 }
@@ -1175,7 +1317,7 @@ function renderReview(){
       <div class="row wrap small dim mt">${icon("pencil","sm")} ${s.notes.length} note(s) · ${icon("image","sm")} ${s.media.length} photo(s) · ${icon("gauge","sm")} ${Object.keys(j.readings||{}).length + s.extractions.length} reading(s) · ${icon("receipt","sm")} ${s.materials.length} expense(s)</div>
       <div class="actionbar mt"><button class="btn" data-open>${icon("eye","sm")} Open job</button><button class="btn go" data-ok>${icon("check","sm")} Approve &amp; close</button><button class="btn danger" data-back>${icon("undo","sm")} Send back</button></div></div>`);
     $("[data-open]", c).addEventListener("click", ()=>openJob(j.id, "completion"));
-    $("[data-ok]", c).addEventListener("click", ()=>approveJob(j));
+    { const ok = $("[data-ok]", c); ok.addEventListener("click", withBusy(ok, ()=>approveJob(j))); }
     $("[data-back]", c).addEventListener("click", ()=>sendBackJob(j));
     g.appendChild(c);
   });
@@ -1207,10 +1349,10 @@ function answerHelp(job, h){
     <div class="field mt"><label>Your answer *</label><textarea name="r" required></textarea></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${icon("send","sm")} Send answer</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const patch = {status:"resolved", response:b.r.value.trim(), resolvedBy:me()?.name||"Supervisor", resolvedAt:now()};
-    await writeDoc("jobs/"+job.id+"/help/"+h.id, patch, true);
+  onSubmit(b, async ()=>{
+    const response = b.r.value.trim(); if (!response){ toast("Type an answer first.","bad"); return; }
+    const patch = {status:"resolved", response, resolvedBy:me()?.name||"Supervisor", resolvedAt:now()};
+    if (!(await writeDoc("jobs/"+job.id+"/help/"+h.id, patch, true))) return;
     Object.assign(sub(job.id).help.find(x=>x.id===h.id)||{}, patch);
     const asker = S.users.find(u=>u.id===h.byId || u.name===h.by);
     await notify(`${patch.resolvedBy} answered your help request on ${job.refNumber}.`, asker?{toUser:asker.id, jobId:job.id}:{toRole:"technician", jobId:job.id});
@@ -1234,7 +1376,7 @@ function renderJob(id){
       <div style="min-width:0">
         <div class="row wrap"><span class="mono" style="font-weight:600;font-size:15px">${esc(j.refNumber)}</span>${statusPill(j.status)}${prioPill(j.priority)}<span class="pill nodot slate">${esc(cap(j.jobType))}</span>${isLate(j)?`<span class="pill bad">Late</span>`:""}</div>
         <h1 style="margin-top:8px">${esc(c?.name||"No customer")}</h1>
-        <div class="row wrap dim" style="margin-top:4px">${icon("pin","sm")}<a href="${esc(mapsUrl(j.siteAddress))}" target="_blank" rel="noopener">${esc(j.siteAddress)}</a>${c?.phone && S.role!=="accountant"?`<span class="faint">·</span>${icon("phone","sm")}<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div>
+        <div class="row wrap dim" style="margin-top:4px">${icon("pin","sm")}<a href="${esc(mapsUrl(j.siteAddress))}" target="_blank" rel="noopener noreferrer">${esc(j.siteAddress)}</a>${c?.phone && S.role!=="accountant"?`<span class="faint">·</span>${icon("phone","sm")}<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div>
       </div>
       <div class="row wrap" id="headActions"></div>
     </div>
@@ -1261,10 +1403,10 @@ function renderJob(id){
   if (can.advance(j)){
     const label = STATUS[j.status].next;
     const b = el(`<button class="btn ${j.status==="working"?"primary":"go"} lg">${icon(j.status==="working"?"send":"chev")} ${esc(label)}</button>`);
-    b.addEventListener("click", ()=>advanceJob(j)); bar.appendChild(b);
+    b.addEventListener("click", withBusy(b, ()=>advanceJob(j))); bar.appendChild(b);
   }
   if (can.approve(j)){
-    const a = el(`<button class="btn go lg">${icon("check")} Approve &amp; close</button>`); a.addEventListener("click", ()=>approveJob(j));
+    const a = el(`<button class="btn go lg">${icon("check")} Approve &amp; close</button>`); a.addEventListener("click", withBusy(a, ()=>approveJob(j)));
     const r = el(`<button class="btn danger lg">${icon("undo")} Send back</button>`); r.addEventListener("click", ()=>sendBackJob(j));
     bar.append(a, r);
   }
@@ -1326,49 +1468,92 @@ function jobOverview(j, s){
 }
 
 /* ---- status flow ---- */
-async function advanceJob(j){
-  const idx = STATUSES.indexOf(j.status); const next = STATUSES[idx+1];
-  if (!next || next==="completed") return;
-  if (next==="completion_review"){
-    const missing = completionItems(j).filter(i=>!i.ok);
-    if (missing.length){ toast("Before submitting, add: "+missing.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return; }
+/* Re-read the job before changing it. Refreshes local state; returns null (with an error toast) if it can't be read
+   or its status is no longer one of `allowed` (someone else changed it). */
+async function freshJob(j, allowed){
+  let snap;
+  try{ snap = await db.doc("jobs/"+j.id).get(); }
+  catch(e){ console.error(e); toast("Couldn't check the latest version of this job. Try again.", "bad"); return null; }
+  if (!snap || !snap.exists){ toast("This job no longer exists.", "bad"); return null; }
+  Object.assign(j, snap.data());
+  if (allowed && !allowed.includes(j.status)){
+    toast(`${j.refNumber} was changed on another device (now ${STATUS[j.status]?.label||j.status}). The screen has been refreshed — nothing was saved.`, "bad");
+    render(); return null;
   }
-  const patch = {status:next}; if (next==="completion_review") patch.submittedAt = now();
-  if (next==="arrived") patch.arrivedAt = now();
-  await writeDoc("jobs/"+j.id, patch, true); Object.assign(j, patch);
-  await logEvent(j.id, "status", {status:next});
-  if (next==="completion_review") await notify(`${me()?.name||"Technician"} submitted ${j.refNumber} for review.`, {toRole:"managers", jobId:j.id});
-  if (next==="en_route") await notify(`${me()?.name||"Technician"} is on the way to ${j.refNumber}.`, {toRole:"dispatcher", jobId:j.id});
-  toast(next==="completion_review" ? "Submitted for supervisor review." : `Status: ${STATUS[next].label}.`);
-  render();
+  return j;
+}
+const OPEN_STATUSES = STATUSES.filter(s=>s!=="completed");
+const EDITABLE_READING_STATUSES = STATUSES.filter(s=>s!=="completed" && s!=="completion_review");
+async function advanceJob(j){
+  return once("status:"+j.id, async ()=>{
+    const shown = j.status;
+    if (!(await freshJob(j, [shown]))) return;
+    const idx = STATUSES.indexOf(j.status); const next = STATUSES[idx+1];
+    if (!next || next==="completed") return;
+    if (next==="completion_review"){
+      const items = completionItems(j);
+      const missing = items.filter(i=>!i.ok && !i.noBlock);
+      if (missing.length){ toast("Before submitting, add: "+missing.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return; }
+      const flagged = items.filter(i=>!i.ok && i.noBlock);
+      if (flagged.length) toast("Note: "+flagged.map(m=>m.label).join(", ")+".", "bad");
+    }
+    const patch = {status:next}; if (next==="completion_review") patch.submittedAt = now();
+    if (next==="arrived") patch.arrivedAt = now();
+    if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+    Object.assign(j, patch);
+    await logEvent(j.id, "status", {status:next});
+    if (next==="completion_review") await notify(`${me()?.name||"Technician"} submitted ${j.refNumber} for review.`, {toRole:"managers", jobId:j.id});
+    if (next==="en_route") await notify(`${me()?.name||"Technician"} is on the way to ${j.refNumber}.`, {toRole:"dispatcher", jobId:j.id});
+    toast(next==="completion_review" ? "Submitted for supervisor review." : `Status: ${STATUS[next].label}.`);
+    render();
+  });
 }
 async function approveJob(j){
-  const missing = completionItems(j).filter(i=>!i.ok);
-  if (missing.length && !(await confirmBox("Close with items missing?", "Still missing: "+missing.map(m=>m.label).join(", ")+". Close anyway?", "Close anyway"))) return;
-  const patch = {status:"completed", closedAt:now(), review:{decision:"approved", by:me()?.name||"Supervisor", at:now()}};
-  await writeDoc("jobs/"+j.id, patch, true); Object.assign(j, patch);
-  await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"});
-  if (j.technicianId) await notify(`${patch.review.by} approved ${j.refNumber}. It's closed and in the archive.`, {toUser:j.technicianId, jobId:j.id});
-  toast(`${j.refNumber} closed and moved to the Archive.`); render();
+  return once("status:"+j.id, async ()=>{
+    if (!(await freshJob(j, ["completion_review"]))) return;
+    const missing = completionItems(j).filter(i=>!i.ok);
+    if (missing.length && !(await confirmBox("Close with items missing?", "Still missing: "+missing.map(m=>m.label).join(", ")+". Close anyway?", "Close anyway"))) return;
+    if (!(await freshJob(j, ["completion_review"]))) return;
+    const patch = {status:"completed", closedAt:now(), review:{decision:"approved", by:me()?.name||"Supervisor", at:now()}};
+    if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+    Object.assign(j, patch);
+    await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"});
+    if (j.technicianId) await notify(`${patch.review.by} approved ${j.refNumber}. It's closed and in the archive.`, {toUser:j.technicianId, jobId:j.id});
+    toast(`${j.refNumber} closed and moved to the Archive.`); render();
+  });
 }
 function sendBackJob(j){
   const b = el(`<form>${modalHead("Send back to technician", j.refNumber)}<div class="field"><label>What needs fixing? *</label><textarea name="r" required placeholder="e.g. Add a photo of the vent termination and the manifold reading."></textarea></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn danger solid">${icon("undo","sm")} Send back</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const patch = {status:"working", review:{decision:"sent_back", reason:b.r.value.trim(), by:me()?.name||"Supervisor", at:now()}, sendBacks:(j.sendBacks||0)+1};
-    await writeDoc("jobs/"+j.id, patch, true); Object.assign(j, patch);
+  onSubmit(b, ()=> once("status:"+j.id, async ()=>{
+    const reason = b.r.value.trim(); if (!reason){ toast("Say what needs fixing.","bad"); return; }
+    if (!(await freshJob(j, ["completion_review"]))){ closeOverlay(); return; }
+    const patch = {status:"working", review:{decision:"sent_back", reason, by:me()?.name||"Supervisor", at:now()}, sendBacks:(j.sendBacks||0)+1};
+    if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+    Object.assign(j, patch);
     await logEvent(j.id, "sent_back", {status:"working", note:patch.review.reason});
     if (j.technicianId) await notify(`${patch.review.by} sent ${j.refNumber} back: ${patch.review.reason}`, {toUser:j.technicianId, jobId:j.id});
     closeOverlay(); toast("Sent back to the technician."); render();
-  });
+  }));
 }
 
 /* ---- create / edit job ---- */
+const refNum = r=> parseInt(String(r||"").replace(/\D/g,""),10);
 function nextRef(){
-  const nums = S.jobs.map(j=>parseInt(String(j.refNumber||"").replace(/\D/g,""),10)).filter(n=>!isNaN(n));
+  const nums = S.jobs.map(j=>refNum(j.refNumber)).filter(n=>!isNaN(n));
   return "JOB-"+(Math.max(1000, ...nums)+1);
+}
+/* Re-read all job refs from the db and return `wanted` if free, otherwise the next free JOB-number. null if the read fails. */
+async function uniqueRef(wanted){
+  let refs;
+  try{ const snap = await db.collection("jobs").get(); refs = new Set(snap.docs.map(d=>String(d.data()?.refNumber||""))); }
+  catch(e){ console.error(e); toast("Couldn't check existing job numbers. Try again.", "bad"); return null; }
+  S.jobs.forEach(x=>refs.add(String(x.refNumber||"")));
+  if (wanted && !refs.has(wanted)) return wanted;
+  let n = Math.max(1000, ...[...refs].map(refNum).filter(x=>!isNaN(x)))+1;
+  while (refs.has("JOB-"+n)) n++;
+  return "JOB-"+n;
 }
 function techWarnings(techId, whenIso, trade, excludeId){
   const out = []; const u = userById(techId); if (!u) return out;
@@ -1383,8 +1568,8 @@ function techWarnings(techId, whenIso, trade, excludeId){
 }
 function openJobForm(j){
   const editing = !!j;
-  const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${c.id}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
-  const techOpts = `<option value="">Unassigned</option>`+fieldUsers().map(u=>`<option value="${u.id}" ${j?.technicianId===u.id?"selected":""}>${esc(u.name)} — ${esc(ROLE_LABELS[u.role])}</option>`).join("");
+  const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
+  const techOpts = `<option value="">Unassigned</option>`+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(u.name)} — ${esc(ROLE_LABELS[u.role])}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
       <div class="field"><label>Customer *</label><select name="customerId" required><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select></div>
@@ -1406,7 +1591,7 @@ function openJobForm(j){
   const f = b;
   function fillEquip(){
     const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid);
-    f.equipmentId.innerHTML = `<option value="">None</option>`+list.map(e=>`<option value="${e.id}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
+    f.equipmentId.innerHTML = `<option value="">None</option>`+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
   }
   function warn(){
     const w = techWarnings(f.technicianId.value, f.scheduledAt.value?new Date(f.scheduledAt.value).toISOString():now(), f.requiredTrade.value, j?.id);
@@ -1420,32 +1605,42 @@ function openJobForm(j){
   });
   ["technicianId","scheduledAt","requiredTrade"].forEach(n=> f[n].addEventListener("change", warn));
   fillEquip(); warn();
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
+  onSubmit(b, async ()=>{
     let customerId = f.customerId.value;
+    const siteAddress = f.siteAddress.value.trim();
+    if (!customerId){ toast("Choose a customer.","bad"); return; }
+    if (!siteAddress){ toast("Enter the service address.","bad"); return; }
+    const when = validDate(f.scheduledAt.value); if (!when){ toast("Enter a valid date and time.","bad"); return; }
     if (customerId==="__new"){
       const name = f.newName.value.trim(); if (!name){ toast("Enter the new customer's name.","bad"); return; }
-      customerId = uid("cust"); const c = {name, phone:f.newPhone.value.trim(), email:"", address:f.siteAddress.value.trim(), createdAt:now()};
-      await writeDoc("customers/"+customerId, c); S.customers.push(Object.assign({id:customerId}, c));
+      customerId = uid("cust"); const c = {name, phone:f.newPhone.value.trim(), email:"", address:siteAddress, createdAt:now()};
+      if (!(await writeDoc("customers/"+customerId, c))) return;
+      S.customers.push(Object.assign({id:customerId}, c));
+      /* Point the form at the saved customer so a retry doesn't create a second one. */
+      f.customerId.insertBefore(el(`<option value="${esc(customerId)}">${esc(name)}</option>`), f.customerId.lastElementChild);
+      f.customerId.value = customerId; $$(".newc", b).forEach(n=>n.hidden=true);
     }
-    const data = {customerId, siteAddress:f.siteAddress.value.trim(), scheduledAt:new Date(f.scheduledAt.value).toISOString(), technicianId:f.technicianId.value||null,
+    const data = {customerId, siteAddress, scheduledAt:when.toISOString(), technicianId:f.technicianId.value||null,
       requiredTrade:f.requiredTrade.value, jobType:f.jobType.value, priority:f.priority.value, equipmentId:f.equipmentId.value||null};
     if (editing){
       const changes = Object.keys(data).filter(k=>String(j[k]??"")!==String(data[k]??""));
       if (!changes.length){ closeOverlay(); return; }
+      if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
       const prevTech = j.technicianId;
-      await writeDoc("jobs/"+j.id, data, true); Object.assign(j, data);
+      if (!(await writeDoc("jobs/"+j.id, data, true))) return;
+      Object.assign(j, data);
       await logEvent(j.id, "edited", {note:"Changed: "+changes.map(k=>({customerId:"customer",siteAddress:"address",scheduledAt:"time",technicianId:"technician",requiredTrade:"trade",jobType:"type",priority:"priority",equipmentId:"equipment"}[k])).join(", ")});
       if (data.technicianId && data.technicianId!==prevTech) await notify(`You've been assigned ${j.refNumber} (${fmtDate(j.scheduledAt)}).`, {toUser:data.technicianId, jobId:j.id});
       else if (data.technicianId && changes.includes("scheduledAt")) await notify(`${j.refNumber} was moved to ${fmtDate(j.scheduledAt)}.`, {toUser:data.technicianId, jobId:j.id});
       closeOverlay(); toast("Job updated."); render(); return;
     }
     const id = uid("job");
-    const job = Object.assign({refNumber:f.refNumber.value.trim()||nextRef(), status:"assigned", leakTest:{status:"not_set"}, createdAt:now(), createdBy:me()?.name||ROLE_LABELS[S.role]}, data);
-    if (S.jobs.some(x=>x.refNumber===job.refNumber)) job.refNumber = nextRef();
-    await writeDoc("jobs/"+id, job); S.jobs.push(Object.assign({id}, job)); S.jobSub[id] = emptySub();
+    const ref = await uniqueRef(f.refNumber.value.trim()); if (!ref) return;
+    const job = Object.assign({refNumber:ref, status:"assigned", leakTest:{status:"not_set"}, createdAt:now(), createdBy:me()?.name||ROLE_LABELS[S.role]}, data);
+    if (!(await writeDoc("jobs/"+id, job))) return;
+    S.jobs.push(Object.assign({id}, job)); S.jobSub[id] = emptySub();
     await logEvent(id, "created", {note:job.technicianId?`Assigned to ${userById(job.technicianId)?.name}`:"Waiting for a technician"});
-    if (f.notes.value.trim()){ const n = {text:f.notes.value.trim(), by:me()?.name||"Dispatcher", byId:S.userId, at:now()}; const nid = await addDoc("jobs/"+id+"/notes", n); sub(id).notes.unshift(Object.assign({id:nid||uid("n")}, n)); }
+    if (f.notes.value.trim()){ const n = {text:f.notes.value.trim(), by:me()?.name||"Dispatcher", byId:S.userId, at:now()}; const nid = await addDoc("jobs/"+id+"/notes", n, `${job.refNumber} was created, but the note couldn't be saved. Add it again on the job.`); if (nid) sub(id).notes.unshift(Object.assign({id:nid}, n)); }
     if (job.technicianId) await notify(`New job ${job.refNumber} for you · ${fmtDate(job.scheduledAt)}.`, {toUser:job.technicianId, jobId:id});
     closeOverlay(); toast(`${job.refNumber} created.`); openJob(id);
   });
@@ -1461,26 +1656,33 @@ function readingDef(j){
   }
   return Object.assign({refrigerant:j.requiredTrade==="refrigeration"}, base);
 }
+/* Readings that can legitimately be below zero (suction can be in vacuum; outdoor air can be below 0 °F). */
+const NEG_OK_READINGS = new Set(["suction","outdoor"]);
 function jobReadings(j, s){
   const wrap = el(`<div class="stack"></div>`);
-  const def = readingDef(j); const r = j.readings||{}; const editable = can.fieldWork(j);
+  const def = readingDef(j); const r = j.readings||{};
+  const inReview = !EDITABLE_READING_STATUSES.includes(j.status);
+  const editable = can.fieldWork(j) && !inReview;
   const form = el(`<form class="card"><div class="card-h"><div><h3>${esc(THEMES[j.requiredTrade]?.label||"")} readings</h3><div class="hint">Type what your instruments show. Leave blank what you didn't measure — nothing is filled in for you.</div></div></div>
+    ${inReview && !isClosed(j)?`<div class="callout mt" style="margin-bottom:12px">${icon("lock","sm")}<div>Readings are locked while the job is in review. A supervisor can send it back if something needs changing.</div></div>`:""}
     <div class="readgrid">${def.fields.map(([k,label,unit])=>`<div class="field"><label>${esc(label)}</label><div class="unitwrap"><input class="mono" name="${k}" inputmode="decimal" value="${esc(r[k]??"")}" ${editable?"":"disabled"}><span>${esc(unit)}</span></div></div>`).join("")}</div>
     ${def.refrigerant?`<div class="field mt"><label>Refrigerant type</label><input name="refrigerant" value="${esc(r.refrigerant||equipmentById(j.equipmentId)?.refrigerant||"")}" placeholder="e.g. R-410A, R-454B" ${editable?"":"disabled"}></div>`:""}
     <h4 class="mt2" style="margin-bottom:8px">Safety checks</h4>
     <div class="stack tight">${def.checks.map(([k,label,req])=>`<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`).join("")}</div>
     ${editable?`<div class="mf"><button class="btn primary">${icon("check","sm")} Save readings</button></div>`:""}
     ${r.savedBy?`<div class="hint mt">Last saved by ${esc(r.savedBy)} · ${esc(ago(r.savedAt))}</div>`:""}</form>`);
-  form.addEventListener("submit", async e=>{
-    e.preventDefault(); const out = {};
+  onSubmit(form, async ()=>{
+    const out = {};
     def.fields.forEach(([k])=>{ const v = form[k].value.trim(); if (v!=="") out[k]=v; });
     def.checks.forEach(([k])=>{ if (form[k].checked) out[k]=true; });
     if (form.refrigerant && form.refrigerant.value.trim()) out.refrigerant = form.refrigerant.value.trim();
-    const bad = def.fields.filter(([k])=> out[k]!==undefined && isNaN(Number(out[k])));
-    if (bad.length){ toast(`“${bad[0][1]}” must be a number.`,"bad"); return; }
+    const bad = def.fields.filter(([k])=> out[k]!==undefined && parseNum(out[k], NEG_OK_READINGS.has(k))===null);
+    if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
+    if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
     if (j.requiredTrade==="hvac" && Number(out.coAirFree)>=400) toast("Flue CO is very high. Check the appliance and consider a red tag before leaving.","bad");
     out.savedBy = me()?.name||""; out.savedAt = now();
-    await writeDoc("jobs/"+j.id, {readings:out}, true); j.readings = out;
+    if (!(await writeDoc("jobs/"+j.id, {readings:out}, true))) return;
+    j.readings = out;
     await logEvent(j.id, "readings", {note:`${Object.keys(out).length-2} reading(s)/check(s) saved`});
     toast("Readings saved."); renderMain();
   });
@@ -1490,37 +1692,50 @@ function jobReadings(j, s){
     ${editable?`<label class="btn primary" style="width:fit-content">${icon("camera","sm")} Take or upload photo<input type="file" accept="image/*" capture="environment" hidden></label>`:""}
     <div id="xz" class="mt"></div>
     <h4 class="mt2" style="margin-bottom:8px">Confirmed from photos</h4><div id="xl"></div></div>`);
-  $("input[type=file]", cam)?.addEventListener("change", ev=>{ const file = ev.target.files[0]; if (file) runExtraction(j, file, $("#xz", cam)); });
+  $("input[type=file]", cam)?.addEventListener("change", ev=>{ const file = ev.target.files[0]; ev.target.value = ""; if (file) runExtraction(j, file, $("#xz", cam)); });
   const conf = s.extractions.filter(x=>x.confirmed);
   $("#xl", cam).innerHTML = conf.length ? `<div class="tablewrap"><table><thead><tr><th>Value</th><th>Meaning</th><th>AI confidence</th><th>By</th><th>When</th></tr></thead><tbody>${conf.map(x=>`<tr><td class="mono">${esc(x.finalValue)} ${esc(x.unit)}${x.corrected?` <span class="pill nodot warn">corrected</span>`:""}</td><td>${esc(x.context)}</td><td>${Math.round((x.confidence||0)*100)}%</td><td>${esc(x.confirmedBy)}</td><td>${esc(ago(x.at))}</td></tr>`).join("")}</tbody></table></div>` : `<div class="hint">None yet.</div>`;
   wrap.appendChild(cam);
   return wrap;
 }
 function runExtraction(j, file, zone){
-  const url = URL.createObjectURL(file);
-  zone.innerHTML = `<div class="row"><img src="${url}" style="width:90px;height:68px;object-fit:cover;border-radius:10px"><span class="hint">Reading the image…</span></div>`;
+  const problem = fileProblem(file); if (problem || !/^image\//i.test(file.type||"")){ toast(problem || "Choose a photo.", "bad"); return; }
+  const clearZone = ()=>{ revokeLocalBlob(zone._blob); zone._blob = null; zone.innerHTML = ""; };
+  clearZone();
+  const url = localBlobUrl(file); zone._blob = url;
+  zone.innerHTML = `<div class="row"><img src="${esc(url)}" style="width:90px;height:68px;object-fit:cover;border-radius:10px"><span class="hint">Reading the image…</span></div>`;
   setTimeout(()=>{
+    if (zone._blob!==url) return; /* replaced by a newer photo */
     const units = THEMES[j.requiredTrade]?.units || ["units"]; const unit = units[0];
     const value = unit==="in.wc" ? (3+Math.random()*4).toFixed(1) : unit==="psig" ? (100+Math.random()*200).toFixed(0) : unit==="V" ? (115+Math.random()*130).toFixed(1) : (Math.random()*60+10).toFixed(1);
     const confidence = 0.6 + Math.random()*0.35;
     zone.innerHTML = "";
-    const c = el(`<div class="callout" style="display:block"><div class="row top" style="gap:12px"><img src="${url}" style="width:110px;height:82px;object-fit:cover;border-radius:10px;flex:none">
+    const c = el(`<div class="callout" style="display:block"><div class="row top" style="gap:12px"><img src="${esc(url)}" style="width:110px;height:82px;object-fit:cover;border-radius:10px;flex:none">
       <div class="stack" style="flex:1"><div class="row wrap"><b>Suggested:</b><input class="in mono" id="v" value="${value}" style="width:96px"><input class="in" id="u" value="${esc(unit)}" style="width:80px"></div>
       <div class="confbar"><div style="width:${Math.round(confidence*100)}%"></div></div><div class="hint">Confidence ${Math.round(confidence*100)}%. Check it against the photo.</div></div></div>
       <div class="field mt"><label>What does this reading mean? *</label><select id="ctx" class="in"><option value="">Choose…</option>${CONTEXT_OPTIONS.map(o=>`<option>${o}</option>`).join("")}</select></div>
       <div class="mf"><button class="btn" id="rt">Retake</button><button class="btn primary" id="ok">${icon("check","sm")} Confirm and save</button></div></div>`);
     zone.appendChild(c);
-    $("#rt", c).addEventListener("click", ()=> zone.innerHTML="");
-    $("#ok", c).addEventListener("click", async ()=>{
+    const okBtn = $("#ok", c), rtBtn = $("#rt", c);
+    rtBtn.addEventListener("click", clearZone);
+    okBtn.addEventListener("click", withBusy([okBtn, rtBtn], async ()=>{
       const ctx = $("#ctx", c).value; if (!ctx){ toast("Choose what the reading means first.","bad"); return; }
-      const up = await uploadFile(file);
-      const rec = {rawValue:value, finalValue:$("#v", c).value.trim(), unit:$("#u", c).value.trim(), confidence, context:ctx, confirmed:true, corrected:$("#v", c).value.trim()!==value,
+      const finalValue = $("#v", c).value.trim(), unitIn = $("#u", c).value.trim();
+      if (parseNum(finalValue, /psig|°F|°C/i.test(unitIn))===null){ toast("The value must be a plain number, e.g. 3.5.","bad"); return; }
+      if (!unitIn){ toast("Enter the unit.","bad"); return; }
+      if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
+      const up = await uploadFile(file); if (!up) return;
+      const rec = {rawValue:value, finalValue, unit:unitIn, confidence, context:ctx, confirmed:true, corrected:finalValue!==value,
         confirmedBy:me()?.name||"", byId:S.userId, at:now(), sourceMediaUrl:up.url};
-      const id = await addDoc("jobs/"+j.id+"/extractions", rec); sub(j.id).extractions.unshift(Object.assign({id:id||uid("x")}, rec));
+      const id = await addDoc("jobs/"+j.id+"/extractions", rec); if (!id) return;
+      sub(j.id).extractions.unshift(Object.assign({id}, rec));
       const m = {url:up.url, assetId:up.assetId, category:"Gauge photo", caption:`${rec.finalValue} ${rec.unit} · ${ctx}`, contentType:file.type, at:now(), by:me()?.name||"", byId:S.userId};
-      const mid = await addDoc("jobs/"+j.id+"/media", m); sub(j.id).media.unshift(Object.assign({id:mid||uid("m")}, m));
-      toast("Reading confirmed and linked to its photo."); renderMain();
-    });
+      const mid = await addDoc("jobs/"+j.id+"/media", m, "The reading was saved, but its photo couldn't be added to Photos.");
+      if (mid) sub(j.id).media.unshift(Object.assign({id:mid}, m));
+      clearZone();
+      if (mid) toast("Reading confirmed and linked to its photo.");
+      renderMain();
+    }));
   }, 900);
 }
 
@@ -1534,14 +1749,17 @@ function jobNotes(j, s){
   if (!s.notes.length) list.innerHTML = `<div class="hint">No notes yet.</div>`;
   s.notes.forEach(n=> list.appendChild(el(`<div class="note"><div class="meta">${esc(n.by)} · ${esc(fmtDate(n.at))}</div>${esc(n.text)}</div>`)));
   if (editable){
-    $("#add", wrap).addEventListener("click", async ()=>{
-      const ta = $("#nt", wrap); const text = ta.value.trim(); if (!text) return;
+    const addBtn = $("#add", wrap);
+    addBtn.addEventListener("click", withBusy(addBtn, async ()=>{
+      const ta = $("#nt", wrap); const text = ta.value.trim(); if (!text){ toast("Type a note first.","bad"); return; }
+      if (!(await freshJob(j, OPEN_STATUSES))) return;
       const rec = {text, by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()};
-      const id = await addDoc("jobs/"+j.id+"/notes", rec); sub(j.id).notes.unshift(Object.assign({id:id||uid("n")}, rec));
+      const id = await addDoc("jobs/"+j.id+"/notes", rec); if (!id) return;
+      sub(j.id).notes.unshift(Object.assign({id}, rec)); ta.value = "";
       const target = isField() ? {toRole:"supervisor", jobId:j.id} : (j.technicianId?{toUser:j.technicianId, jobId:j.id}:null);
       if (target) await notify(`${rec.by} added a note on ${j.refNumber}.`, target);
       toast("Note added."); renderMain();
-    });
+    }));
     setupDictation($("#mic", wrap), $("#nt", wrap));
   }
   return wrap;
@@ -1566,7 +1784,8 @@ function setupDictation(btn, ta){
 /* ---- media ---- */
 function thumb(m){
   const isVid = (m.contentType||"").startsWith("video");
-  const t = el(`<div class="thumb">${isVid?`<video src="${esc(m.url)}" muted></video>`:`<img src="${esc(m.url)}" alt="${esc(m.category||"photo")}" loading="lazy">`}<span class="cap">${esc(m.category||"Photo")}</span></div>`);
+  const src = safeUrl(m.url, isVid?"media":"img");
+  const t = el(`<div class="thumb">${!src?`<div class="empty" style="padding:18px 6px">${icon("image")}<div class="tiny">Can't show this file</div></div>`:isVid?`<video src="${esc(src)}" muted></video>`:`<img src="${esc(src)}" alt="${esc(m.category||"photo")}" loading="lazy">`}<span class="cap">${esc(m.category||"Photo")}</span></div>`);
   t.addEventListener("click", ()=>openLightbox(m)); return t;
 }
 function jobMedia(j, s){
@@ -1577,30 +1796,65 @@ function jobMedia(j, s){
   const g = $("#g", wrap);
   if (!s.media.length) g.outerHTML = `<div class="hint">No photos yet.</div>`;
   s.media.forEach(m=>g.appendChild(thumb(m)));
-  $("input[type=file]", wrap)?.addEventListener("change", async ev=>{
+  const fileIn = $("input[type=file]", wrap);
+  fileIn?.addEventListener("change", async ev=>{
     const files = Array.from(ev.target.files||[]); if (!files.length) return;
-    toast(`Uploading ${files.length} file(s)…`);
-    for (const file of files){
-      const up = await uploadFile(file);
-      const rec = {url:up.url, assetId:up.assetId, category:$("#cat", wrap).value, caption:$("#capt", wrap).value.trim(), contentType:file.type, at:now(), by:me()?.name||"", byId:S.userId};
-      const id = await addDoc("jobs/"+j.id+"/media", rec); sub(j.id).media.unshift(Object.assign({id:id||uid("m")}, rec));
-    }
-    if (isField()) await notify(`${me()?.name} added ${files.length} photo(s) on ${j.refNumber}.`, {toRole:"supervisor", jobId:j.id});
-    toast("Added."); renderMain();
+    if (fileIn.dataset.busy){ return; }
+    /* Read category and caption once, before any await, so every file in this batch gets the same values. */
+    const category = $("#cat", wrap).value, caption = $("#capt", wrap).value.trim();
+    const label = fileIn.closest("label"); fileIn.dataset.busy = "1"; fileIn.disabled = true; label?.setAttribute("aria-disabled","true"); if (label) label.style.opacity = ".45";
+    let added = 0;
+    try{
+      if (!(await freshJob(j, OPEN_STATUSES))) return;
+      toast(`Uploading ${files.length} file(s)…`);
+      for (const file of files){
+        const up = await uploadFile(file); if (!up) continue;
+        const rec = {url:up.url, assetId:up.assetId, category, caption, contentType:file.type, at:now(), by:me()?.name||"", byId:S.userId};
+        const id = await addDoc("jobs/"+j.id+"/media", rec, `Couldn't save “${file.name}”.`); if (!id) continue;
+        sub(j.id).media.unshift(Object.assign({id}, rec)); added++;
+      }
+      if (added && isField()) await notify(`${me()?.name} added ${added} photo(s) on ${j.refNumber}.`, {toRole:"supervisor", jobId:j.id});
+      if (added===files.length) toast("Added.");
+      else if (added) toast(`Added ${added} of ${files.length} file(s). The others were not saved.`, "bad");
+      else toast("Nothing was added.", "bad");
+      if (added) renderMain();
+    }finally{ delete fileIn.dataset.busy; fileIn.disabled = false; fileIn.value = ""; label?.removeAttribute("aria-disabled"); if (label) label.style.opacity = ""; }
   });
   return wrap;
 }
 
 /* ---- leak test ---- */
+/* Leak result: only an explicit "Pass" counts as OK. Fail, Inconclusive or an unknown result is never shown as green. */
+function leakResultKind(lt){
+  if (!lt || lt.status!=="completed") return null;
+  const r = String(lt.result||"");
+  if (/^\s*pass/i.test(r)) return "pass";
+  if (/fail/i.test(r)) return "fail";
+  if (/inconclusive/i.test(r)) return "inconclusive";
+  return "unknown";
+}
 function leakChip(j){
   const lt = j.leakTest||{status:"not_set"};
-  if (lt.status==="completed") return `<div class="callout ${/Fail/.test(lt.result)?"bad":"ok"}">${icon("droplet")}<div><b>${esc(lt.result||"Completed")}</b><div class="hint">${esc(lt.method||"")}${lt.notes?" — "+esc(lt.notes):""}</div><div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
+  if (lt.status==="completed"){
+    const k = leakResultKind(lt); const cls = k==="pass"?"ok":k==="fail"?"bad":"warn";
+    return `<div class="callout ${cls}">${icon(k==="pass"?"droplet":"alert")}<div><b>${esc(lt.result||"Result not recorded")}</b>${k!=="pass"?`<div><b>Not OK —</b> ${k==="fail"?"a leak was found.":"the result needs a re-check."}</div>`:""}<div class="hint">${esc(lt.method||"")}${lt.notes?" — "+esc(lt.notes):""}</div><div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
+  }
   if (lt.status==="skipped") return `<div class="callout" style="--c:var(--slate)">${icon("droplet")}<div><b>Skipped</b>${lt.reason?` — ${esc(lt.reason)}`:""}<div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
   return `<div class="callout ${leakRelevant(j)?"warn":""}">${icon("droplet")}<div><b>Not recorded yet</b><div class="hint">${leakRelevant(j)?"Recommended for this job (gas work or new installation).":"Optional for this job — record it or skip it."}</div></div></div>`;
 }
+function leakSummary(lt){ return !lt || lt.status==="not_set" ? "not recorded" : lt.status==="skipped" ? `skipped (${lt.reason||"no reason"})` : (lt.result||"completed"); }
+/* Build the patch that replaces the leak test and keeps the previous one in leakHistory. */
+function leakPatch(j, next){
+  const prev = j.leakTest;
+  const hist = Array.isArray(j.leakHistory) ? j.leakHistory.slice() : [];
+  if (prev && prev.status && prev.status!=="not_set") hist.push(Object.assign({}, prev, {replacedAt:now(), replacedBy:me()?.name||""}));
+  return {leakTest:next, leakHistory:hist};
+}
 function jobLeak(j){
   const editable = can.fieldWork(j); const lt = j.leakTest||{status:"not_set"};
-  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. Either way the job can move on.</div></div></div>${leakChip(j)}<div class="actionbar mt" id="a"></div></div>`);
+  const hist = Array.isArray(j.leakHistory) ? j.leakHistory : [];
+  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. Either way the job can move on.</div></div></div>${leakChip(j)}<div class="actionbar mt" id="a"></div>
+    ${hist.length?`<h4 class="mt2" style="margin-bottom:6px">Earlier results</h4><div class="stack tight">${hist.slice().reverse().map(h=>`<div class="note"><div class="meta">${esc(h.by||"")} · ${esc(fmtDate(h.at))} · replaced ${esc(fmtDate(h.replacedAt))}${h.replacedBy?" by "+esc(h.replacedBy):""}</div>${esc(leakSummary(h))}${h.method?" · "+esc(h.method):""}${h.notes?" — "+esc(h.notes):""}</div>`).join("")}</div>`:""}</div>`);
   const a = $("#a", wrap);
   if (editable && lt.status==="not_set"){
     const c = el(`<button class="btn primary">${icon("droplet","sm")} Record leak test</button>`); c.addEventListener("click", ()=>leakForm(j));
@@ -1608,7 +1862,16 @@ function jobLeak(j){
     a.append(c, s);
   } else if (editable){
     const r = el(`<button class="btn sm">${icon("undo","sm")} Change</button>`);
-    r.addEventListener("click", async ()=>{ j.leakTest={status:"not_set"}; await writeDoc("jobs/"+j.id, {leakTest:j.leakTest}, true); renderMain(); });
+    r.addEventListener("click", withBusy(r, async ()=>{
+      if (!(await confirmBox("Change the leak test?", `The current result (${leakSummary(lt)}) will be moved to “Earlier results” and logged in the timeline. You then record a new result or skip.`, "Change"))) return;
+      if (!(await freshJob(j, OPEN_STATUSES))) return;
+      const before = leakSummary(j.leakTest);
+      const patch = leakPatch(j, {status:"not_set"});
+      if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+      Object.assign(j, patch);
+      await logEvent(j.id, "leak", {note:`Leak test result cleared for a new entry (was: ${before})`});
+      toast("Previous result kept in the history. Record a new result or skip."); renderMain();
+    }));
     a.appendChild(r);
   }
   return wrap;
@@ -1620,30 +1883,38 @@ function leakForm(j){
     <div class="field mt"><label>Details</label><textarea name="notes" placeholder="Pressure held, duration, fittings checked…"></textarea></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
+  onSubmit(b, async ()=>{
+    if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
     const lt = {status:"completed", result:b.result.value, method:b.method.value, notes:b.notes.value.trim(), at:now(), by:me()?.name||""};
-    await writeDoc("jobs/"+j.id, {leakTest:lt}, true); j.leakTest = lt;
+    const patch = leakPatch(j, lt);
+    if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+    Object.assign(j, patch);
     await logEvent(j.id, "leak", {note:lt.result});
-    if (/Fail/.test(lt.result)) await notify(`Leak test FAILED on ${j.refNumber}.`, {toRole:"managers", jobId:j.id});
+    const k = leakResultKind(lt);
+    if (k==="fail") await notify(`Leak test FAILED on ${j.refNumber}.`, {toRole:"managers", jobId:j.id});
+    else if (k==="inconclusive") await notify(`Leak test INCONCLUSIVE on ${j.refNumber} — re-check needed.`, {toRole:"managers", jobId:j.id});
     closeOverlay(); toast("Leak test recorded."); renderMain();
   });
 }
 function leakSkip(j){
-  const b = el(`<form>${modalHead("Skip leak test", j.refNumber)}<div class="field"><label>Reason${leakRelevant(j)?" *":""}</label><input name="reason" ${leakRelevant(j)?"required":""} placeholder="e.g. No gas connections touched"></div>
+  const b = el(`<form>${modalHead("Skip leak test", j.refNumber)}<div class="field"><label>Reason *</label><input name="reason" required placeholder="e.g. No gas connections touched"></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Skip</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const lt = {status:"skipped", reason:b.reason.value.trim(), at:now(), by:me()?.name||""};
-    await writeDoc("jobs/"+j.id, {leakTest:lt}, true); j.leakTest = lt;
+  onSubmit(b, async ()=>{
+    const reason = b.reason.value.trim(); if (!reason){ toast("Give a reason for skipping the leak test.","bad"); return; }
+    if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
+    const lt = {status:"skipped", reason, at:now(), by:me()?.name||""};
+    const patch = leakPatch(j, lt);
+    if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
+    Object.assign(j, patch);
+    await logEvent(j.id, "leak", {note:"Leak test skipped: "+reason});
     closeOverlay(); toast("Leak test skipped."); renderMain();
   });
 }
 
 /* ---- materials ---- */
-const lineTotal = m=> Number(m.qty||1)*Number(m.unitCost||0);
-function expensePill(s){ const m = {approved:["ok","Approved"], rejected:["bad","Rejected"], clarify:["warn","Question"], pending:["slate","Pending"]}[s||"pending"]||["slate",s]; return `<span class="pill ${m[0]}">${m[1]}</span>`; }
+const lineTotal = m=> Number(m.qty ?? 1)*Number(m.unitCost||0);
+function expensePill(s){ const map = {approved:["ok","Approved"], rejected:["bad","Rejected"], clarify:["warn","Question"], pending:["slate","Pending"]}; const k = s||"pending"; const m = Object.hasOwn(map, k) ? map[k] : ["slate", String(k)]; return `<span class="pill ${esc(m[0])}">${esc(m[1])}</span>`; }
 function jobMaterials(j, s){
   const editable = can.fieldWork(j);
   const total = s.materials.reduce((n,m)=>n+lineTotal(m),0);
@@ -1653,18 +1924,20 @@ function jobMaterials(j, s){
   const t = $("#t", wrap);
   if (!s.materials.length){ t.innerHTML = `<div class="hint">Nothing logged yet.</div>`; return wrap; }
   s.materials.forEach(m=>{
-    const r = el(`<div class="note" style="margin-bottom:8px"><div class="row between wrap"><div><b>${esc(m.description)}</b><div class="hint">${esc(m.qty)} × ${money(m.unitCost)} · ${esc(m.source||"")}${m.receiptUrl?` · <a href="${esc(m.receiptUrl)}" target="_blank" rel="noopener">receipt</a>`:""}</div></div><div class="row"><b class="mono">${money(lineTotal(m))}</b>${expensePill(m.status)}</div></div></div>`);
+    const r = el(`<div class="note" style="margin-bottom:8px"><div class="row between wrap"><div><b>${esc(m.description)}</b><div class="hint">${esc(m.qty)} × ${money(m.unitCost)} · ${esc(m.source||"")}${m.receiptUrl?(safeUrl(m.receiptUrl,"href")?` · <a href="${esc(safeUrl(m.receiptUrl,"href"))}" target="_blank" rel="noopener noreferrer">receipt</a>`:` · receipt stored (can't be opened here)`):""}</div></div><div class="row"><b class="mono">${money(lineTotal(m))}</b>${expensePill(m.status)}</div></div></div>`);
     if (m.status==="clarify"){
       r.appendChild(el(`<div class="callout warn" style="margin-top:8px">${icon("message","sm")}<div><b>${esc(m.decidedBy||"Accounting")} asks:</b> ${esc(m.clarifyMsg||"")}</div></div>`));
       if ((isField() && j.technicianId===S.userId) || S.role==="owner"){
         const rep = el(`<div class="row mt"><input class="in" placeholder="Your answer…"><button class="btn primary sm">Reply</button></div>`);
-        $("button", rep).addEventListener("click", async ()=>{
-          const v = $("input", rep).value.trim(); if (!v) return;
+        const repBtn = $("button", rep);
+        repBtn.addEventListener("click", withBusy(repBtn, async ()=>{
+          const v = $("input", rep).value.trim(); if (!v){ toast("Type your answer first.","bad"); return; }
           const patch = {status:"pending", reply:v, repliedAt:now()};
-          await writeDoc("jobs/"+j.id+"/materials/"+m.id, patch, true); Object.assign(m, patch);
+          if (!(await writeDoc("jobs/"+j.id+"/materials/"+m.id, patch, true))) return;
+          Object.assign(m, patch);
           await notify(`${me()?.name} answered your question about “${m.description}” on ${j.refNumber}.`, {toRole:"accountant", jobId:j.id});
           toast("Reply sent to accounting."); renderMain();
-        });
+        }));
         r.appendChild(rep);
       }
     }
@@ -1682,11 +1955,17 @@ function materialForm(j){
     <div class="field"><label>Receipt photo</label><input type="file" name="receipt" accept="image/*,application/pdf"></div></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const file = b.receipt.files[0]; const up = file ? await uploadFile(file) : {url:null, assetId:null};
-    const rec = {description:b.description.value.trim(), qty:Number(b.qty.value||1), unitCost:Number(b.unitCost.value||0), source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
-    const id = await addDoc("jobs/"+j.id+"/materials", rec); sub(j.id).materials.unshift(Object.assign({id:id||uid("mt")}, rec));
+  onSubmit(b, async ()=>{
+    const description = b.description.value.trim(); if (!description){ toast("Enter a description.","bad"); return; }
+    const qty = parseNum(b.qty.value===""?"1":b.qty.value, false), unitCost = parseNum(b.unitCost.value===""?"0":b.unitCost.value, false);
+    if (qty===null || b.qty.validity.badInput){ toast("Quantity must be a number, 0 or more.","bad"); return; }
+    if (b.unitCost.validity.badInput){ toast("Unit cost must be a number, 0 or more.","bad"); return; }
+    if (unitCost===null){ toast("Unit cost must be a number, 0 or more.","bad"); return; }
+    const file = b.receipt.files[0]; let up = {url:null, assetId:null};
+    if (file){ up = await uploadFile(file); if (!up) return; }
+    const rec = {description, qty, unitCost, source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
+    const id = await addDoc("jobs/"+j.id+"/materials", rec); if (!id) return;
+    sub(j.id).materials.unshift(Object.assign({id}, rec));
     await notify(`New expense on ${j.refNumber}: ${rec.description} (${money(lineTotal(rec))}).`, {toRole:"accountant", jobId:j.id});
     closeOverlay(); toast("Saved and sent to accounting."); renderMain();
   });
@@ -1723,26 +2002,73 @@ function hazardCard(h, j){
     <div class="actionbar mt"></div></div>`);
   const ab = $(".actionbar", c);
   const canAct = S.role!=="accountant" && (!j || !isClosed(j));
+  /* Timeline entries go to the job the tag was raised on, or else the job being viewed. */
+  const logJobId = (h.jobId && jobById(h.jobId)) ? h.jobId : (j?.id || null);
+  const tagName = `${equipmentLabel(equipmentById(h.equipmentId))} at ${customerById(h.customerId)?.name||"site"}`;
+  const audit = async (note, msg)=>{
+    if (logJobId) await logEvent(logJobId, "hazard", {note, hazardId:h.id});
+    if (msg) await notify(msg, logJobId?{toRole:"managers", jobId:logJobId}:{toRole:"managers"});
+  };
   if (canAct && h.status!=="resolved"){
-    if (!h.writtenNoticeSentAt){ const w = el(`<button class="btn sm">${icon("send","sm")} Written notice sent</button>`); w.addEventListener("click", async ()=>{ h.writtenNoticeSentAt = now(); await writeDoc("hazards/"+h.id, {writtenNoticeSentAt:h.writtenNoticeSentAt}, true); toast("Recorded."); render(); }); ab.appendChild(w); }
+    if (!h.distributorNotifiedAt){
+      const d = el(`<button class="btn sm danger">${icon("phone","sm")} Record distributor notified</button>`);
+      d.addEventListener("click", ()=>distributorForm(h, audit));
+      ab.appendChild(d);
+    }
+    if (!h.writtenNoticeSentAt){
+      const w = el(`<button class="btn sm">${icon("send","sm")} Written notice sent</button>`);
+      w.addEventListener("click", withBusy(w, async ()=>{
+        if (!(await confirmBox("Written notice sent?", `Confirm the written notice about this red tag (${tagName}) has been sent to the gas distributor. This is recorded with your name and today's date.`, "Yes, it was sent"))) return;
+        const p = {writtenNoticeSentAt:now(), writtenNoticeSentBy:me()?.name||""};
+        if (!(await writeDoc("hazards/"+h.id, p, true))) return;
+        Object.assign(h, p);
+        await audit("Red tag: written notice to the gas distributor recorded as sent", `Written notice sent to the distributor for the red tag on ${tagName} (${p.writtenNoticeSentBy||"unknown"}).`);
+        toast("Recorded."); render();
+      }));
+      ab.appendChild(w);
+    }
     const r = el(`<button class="btn sm go">${icon("check","sm")} Mark corrected</button>`);
     r.addEventListener("click", ()=>{
       const b = el(`<form>${modalHead("Mark corrected")}<div class="field"><label>What was done to correct it? *</label><textarea name="r" required></textarea></div><div class="hint mt">Only a certificate holder may remove a posted notice.</div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn go">Save</button></div></form>`);
       showModal(b);
-      b.addEventListener("submit", async e=>{ e.preventDefault(); const p = {status:"resolved", resolution:b.r.value.trim(), resolvedBy:me()?.name||"", resolvedAt:now()}; await writeDoc("hazards/"+h.id, p, true); Object.assign(h,p); closeOverlay(); toast("Red tag resolved."); render(); });
+      onSubmit(b, async ()=>{
+        const resolution = b.r.value.trim(); if (!resolution){ toast("Say what was done to correct it.","bad"); return; }
+        const p = {status:"resolved", resolution, resolvedBy:me()?.name||"", resolvedAt:now()};
+        if (!(await writeDoc("hazards/"+h.id, p, true))) return;
+        Object.assign(h,p);
+        await audit("Red tag resolved: "+resolution, `Red tag on ${tagName} was marked corrected by ${p.resolvedBy||"unknown"}: ${resolution}`);
+        closeOverlay(); toast("Red tag resolved."); render();
+      });
     });
     ab.appendChild(r);
   }
   return c;
 }
+function distributorForm(h, audit){
+  const b = el(`<form>${modalHead("Record distributor notified", "When was the gas distributor told about this condition?")}
+    <div class="field"><label>Distributor notified orally at *</label><input type="datetime-local" name="when" required></div>
+    <div class="hint mt">Written notice to the distributor is tracked as due 14 days after this time.</div>
+    <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
+  showModal(b);
+  onSubmit(b, async ()=>{
+    const d = validDate(b.when.value); if (!d){ toast("Enter the date and time the distributor was told.","bad"); return; }
+    if (d.getTime() > Date.now()+5*60000){ toast("That time is in the future.","bad"); return; }
+    const p = {distributorNotifiedAt:d.toISOString(), distributorNotifiedRecordedBy:me()?.name||"", distributorNotifiedRecordedAt:now()};
+    if (!h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
+    if (!(await writeDoc("hazards/"+h.id, p, true))) return;
+    Object.assign(h, p);
+    await audit(`Red tag: gas distributor notified orally at ${fmtDate(p.distributorNotifiedAt)}`, null);
+    closeOverlay(); toast("Distributor notification recorded."); render();
+  });
+}
 function hazardForm(j){
   const b = el(`<form>${modalHead("Report unsafe condition", j.refNumber+" · "+(customerById(j.customerId)?.name||""))}
     <div class="grid g2">
-      <div class="field"><label>Equipment</label><select name="equipmentId"><option value="">Not linked</option>${S.equipment.filter(e=>e.siteCustomerId===j.customerId).map(e=>`<option value="${e.id}" ${j.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))}</option>`).join("")}</select></div>
+      <div class="field"><label>Equipment</label><select name="equipmentId"><option value="">Not linked</option>${S.equipment.filter(e=>e.siteCustomerId===j.customerId).map(e=>`<option value="${esc(e.id)}" ${j.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))}</option>`).join("")}</select></div>
       <div class="field"><label>Hazard level *</label><select name="level"><option value="immediate">Immediate hazard</option><option value="not_immediate">No immediate hazard</option></select></div>
       <div class="field" style="grid-column:1/-1"><label>What did you find? *</label><textarea name="description" required placeholder="Objective observations only."></textarea></div>
       <div class="field"><label>Code clause (CSA B149.1 / regulation)</label><input name="codeRef" placeholder="e.g. B149.1 clause …"></div>
-      <div class="field"><label>Distributor notified orally at</label><input type="datetime-local" name="notified" value="${esc(toLocalInput())}"></div>
+      <div class="field"><label>Distributor notified orally at</label><input type="datetime-local" name="notified"><div class="hint">Leave empty if not yet told — you can record it later on the red tag.</div></div>
     </div>
     <div class="stack tight mt">
       <label class="check"><input type="checkbox" name="gasShutOff"><span>Gas supply shut off to the appliance</span></label>
@@ -1755,13 +2081,19 @@ function hazardForm(j){
   showModal(b, {wide:true});
   b.level.addEventListener("change", ()=>{ b.gasShutOff.checked = b.level.value==="immediate"; });
   b.gasShutOff.checked = true;
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const notified = b.notified.value ? new Date(b.notified.value).toISOString() : null;
-    const rec = {jobId:j.id, equipmentId:b.equipmentId.value||null, customerId:j.customerId, hazardLevel:b.level.value, description:b.description.value.trim(), codeRef:b.codeRef.value.trim(),
+  onSubmit(b, async ()=>{
+    const description = b.description.value.trim(); if (!description){ toast("Describe what you found.","bad"); return; }
+    let notified = null;
+    if (b.notified.value){
+      const d = validDate(b.notified.value); if (!d){ toast("Enter a valid date and time for the distributor notice.","bad"); return; }
+      if (d.getTime() > Date.now()+5*60000){ toast("The distributor notice time is in the future.","bad"); return; }
+      notified = d.toISOString();
+    }
+    const rec = {jobId:j.id, equipmentId:b.equipmentId.value||null, customerId:j.customerId, hazardLevel:b.level.value, description, codeRef:b.codeRef.value.trim(),
       gasShutOff:b.gasShutOff.checked, tagAffixed:b.tagAffixed.checked, userNoticeGiven:b.userNotice.checked, tssaNotified:b.tssa.checked,
       distributorNotifiedAt:notified, writtenNoticeDue:notified?new Date(ts(notified)+14*DAY).toISOString():null, status:"open", by:me()?.name||"", byId:S.userId, at:now()};
-    const id = uid("hz"); await writeDoc("hazards/"+id, rec); S.hazards.push(Object.assign({id}, rec));
+    const id = uid("hz"); if (!(await writeDoc("hazards/"+id, rec))) return;
+    S.hazards.push(Object.assign({id}, rec));
     await logEvent(j.id, "hazard", {note:(rec.hazardLevel==="immediate"?"Immediate hazard: ":"Unsafe condition: ")+rec.description});
     await notify(`Red tag on ${j.refNumber}: ${rec.description}`, {toRole:"managers", jobId:j.id});
     closeOverlay(); toast("Red tag saved. It now shows on the equipment passport."); render();
@@ -1773,10 +2105,16 @@ function completionItems(j){
   const s = sub(j.id), items = [];
   items.push({label:"a work note", ok:s.notes.length>0, tab:"notes", hint:"What you found and what you did."});
   items.push({label:"at least one photo", ok:s.media.length>0, tab:"media", hint:"Before / after or the nameplate."});
-  if (S.config.modules.leakTest) items.push({label:"leak test recorded or skipped", ok:["completed","skipped"].includes(j.leakTest?.status), tab:"leak", hint:leakRelevant(j)?"Recommended for this job.":"Optional — record or skip."});
+  if (S.config.modules.leakTest){
+    const k = leakResultKind(j.leakTest);
+    /* Fail / Inconclusive show as NOT OK (red). noBlock: whether that should stop submission is an owner decision, so it doesn't block yet. */
+    if (k && k!=="pass") items.push({label:`leak test result: ${k==="fail"?"FAIL":k==="inconclusive"?"inconclusive":"unknown"}`, ok:false, bad:true, noBlock:true, tab:"leak", hint:"The leak test did not pass. Fix and re-test, then change the result."});
+    else items.push({label:"leak test recorded or skipped", ok:["completed","skipped"].includes(j.leakTest?.status), tab:"leak", hint:leakRelevant(j)?"Recommended for this job.":"Optional — record or skip."});
+  }
   const def = readingDef(j); const req = def.checks.filter(c=>c[2]);
   req.forEach(([k,label])=> items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:!!(j.readings||{})[k], tab:"readings", hint:"Confirm it in Readings."}));
-  const hz = S.hazards.filter(h=>h.jobId===j.id && h.status!=="resolved");
+  /* Open red tags on this job OR on the same equipment from an earlier visit. */
+  const hz = openHazards(h=>h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId));
   if (hz.length) items.push({label:"red tag: distributor notice time recorded", ok:hz.every(h=>h.distributorNotifiedAt), tab:"safety", hint:"Record when the gas distributor was told."});
   items.push({label:"help requests answered", ok:s.help.every(h=>h.status==="resolved"), tab:"overview", hint:"Wait for the supervisor's answer."});
   return items;
@@ -1786,7 +2124,7 @@ function jobChecklist(j){
   const wrap = el(`<div class="card"><div class="row" style="gap:14px"><div class="ring" style="--p:${Math.round(done/items.length*100)}"><span>${done}/${items.length}</span></div><div><h3>Closing checklist</h3><div class="hint">Trade team only. The technician submits when everything is in; a supervisor approves and the job is closed and archived. The customer is not involved.</div></div></div>
     <div class="stack tight mt" id="l"></div></div>`);
   items.forEach(i=>{
-    const r = el(`<div class="check" style="cursor:pointer;align-items:center"><span class="pill ${i.ok?"ok":"warn"}">${i.ok?"Done":"Needed"}</span><div style="flex:1"><b>${esc(cap(i.label))}</b>${i.ok?"":`<div class="hint">${esc(i.hint)}</div>`}</div>${i.ok?"":icon("chev","sm")}</div>`);
+    const r = el(`<div class="check" style="cursor:pointer;align-items:center"><span class="pill ${i.ok?"ok":i.bad?"bad":"warn"}">${i.ok?"Done":i.bad?"Not OK":"Needed"}</span><div style="flex:1"><b>${esc(cap(i.label))}</b>${i.ok?"":`<div class="hint">${esc(i.hint)}</div>`}</div>${i.ok?"":icon("chev","sm")}</div>`);
     if (!i.ok) r.addEventListener("click", ()=>{ S.view.jobTab = i.tab; renderMain(); });
     $("#l", wrap).appendChild(r);
   });
@@ -1805,7 +2143,7 @@ function timelineItem(f){
     else text = f.note || cap(kind);
     if (kind==="status" && f.note && f.status!=="completed") text += ` · ${f.note}`;
   }
-  const [ic, c] = map[kind] || ["clock","slate"];
+  const [ic, c] = (typeof kind==="string" && Object.hasOwn(map, kind)) ? map[kind] : ["clock","slate"];
   return el(`<div class="ev" style="--c:var(--${c})"><div class="dot">${icon(ic)}</div><div>${f.job?`<span class="mono small">${esc(f.job.refNumber)}</span> · `:""}${esc(text)}</div><div class="meta">${esc(f.by||"")} · ${esc(fmtDate(f.at))}</div></div>`);
 }
 function jobTimeline(j, s){
@@ -1828,10 +2166,11 @@ function openHelpForm(j){
   const b = el(`<form>${modalHead("Ask a supervisor", j.refNumber)}<div class="field"><label>What do you need help with? *</label><textarea name="m" required placeholder="Describe what you see and what you've tried."></textarea></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${icon("send","sm")} Send</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const rec = {message:b.m.value.trim(), by:me()?.name||"", byId:S.userId, at:now(), status:"open"};
-    const id = await addDoc("jobs/"+j.id+"/help", rec); sub(j.id).help.unshift(Object.assign({id:id||uid("h")}, rec));
+  onSubmit(b, async ()=>{
+    const message = b.m.value.trim(); if (!message){ toast("Describe what you need help with.","bad"); return; }
+    const rec = {message, by:me()?.name||"", byId:S.userId, at:now(), status:"open"};
+    const id = await addDoc("jobs/"+j.id+"/help", rec); if (!id) return;
+    sub(j.id).help.unshift(Object.assign({id}, rec));
     await notify(`${rec.by} needs help on ${j.refNumber}: ${rec.message}`, {toRole:"supervisor", jobId:j.id});
     closeOverlay(); toast("Sent to your supervisor."); render();
   });
@@ -1896,20 +2235,23 @@ function equipmentForm(e, presetCustomer){
       <div class="field"><label>Filter size</label><input name="filterSize" value="${esc(e?.filterSize||"")}" placeholder="16x25x1"></div>
       <div class="field"><label>Install date</label><input name="installDate" type="date" value="${esc(e?.installDate||"")}"></div>
       <div class="field"><label>Warranty until</label><input name="warrantyUntil" type="date" value="${esc(e?.warrantyUntil||"")}"></div>
-      <div class="field" style="grid-column:1/-1"><label>Customer / site</label><select name="siteCustomerId"><option value="">—</option>${S.customers.map(c=>`<option value="${c.id}" ${(e?.siteCustomerId||presetCustomer)===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
+      <div class="field" style="grid-column:1/-1"><label>Customer / site</label><select name="siteCustomerId"><option value="">—</option>${S.customers.map(c=>`<option value="${esc(c.id)}" ${(e?.siteCustomerId||presetCustomer)===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
       <div class="field" style="grid-column:1/-1"><label>Internal notes</label><textarea name="notes" placeholder="Location in house, access, quirks…">${esc(e?.notes||"")}</textarea></div>
     </div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${editing?"Save":"Add equipment"}</button></div></form>`);
   showModal(b, {wide:true});
-  b.addEventListener("submit", async ev=>{
-    ev.preventDefault();
+  onSubmit(b, async ()=>{
     const data = {}; ["manufacturer","model","serial","type","fuel","input","refrigerant","filterSize","installDate","warrantyUntil","notes"].forEach(k=>data[k]=b[k].value.trim());
     data.siteCustomerId = b.siteCustomerId.value||null;
-    const dup = S.equipment.find(x=>x.serial && x.serial.toLowerCase()===data.serial.toLowerCase() && x.id!==e?.id);
+    const missing = [["manufacturer","Manufacturer"],["model","Model"],["serial","Serial number"]].find(([k])=>!data[k]);
+    if (missing){ toast(`Enter the ${missing[1].toLowerCase()}.`,"bad"); return; }
+    const dup = S.equipment.find(x=>x.serial && String(x.serial).toLowerCase()===data.serial.toLowerCase() && x.id!==e?.id);
+    /* confirmBox stacks over this form, so Cancel returns to the filled-in form. */
     if (dup && !(await confirmBox("Serial already on file", `${equipmentLabel(dup)} already uses serial ${dup.serial}. Save anyway?`, "Save anyway"))) return;
-    if (editing){ await writeDoc("equipment/"+e.id, data, true); Object.assign(e, data); closeOverlay(); toast("Equipment updated."); render(); return; }
+    if (editing){ if (!(await writeDoc("equipment/"+e.id, data, true))) return; Object.assign(e, data); closeOverlay(); toast("Equipment updated."); render(); return; }
     const id = uid("eq"); const rec = Object.assign(data, {qrStatus:"not_active", createdAt:now()});
-    await writeDoc("equipment/"+id, rec); S.equipment.push(Object.assign({id}, rec));
+    if (!(await writeDoc("equipment/"+id, rec))) return;
+    S.equipment.push(Object.assign({id}, rec));
     closeOverlay(); toast("Equipment added."); openEquipment(id);
   });
 }
@@ -1959,7 +2301,7 @@ function qrCard(e){
   const card = el(active ? `<div class="card" style="text-align:center"><div class="card-h"><h3>${icon("qr","sm")} Equipment QR</h3><span class="pill ok">Active</span></div>
     <div id="qrbox"></div>
     <div class="tiny faint mono" style="word-break:break-all;margin-top:6px">${esc(e.qrToken)}</div>
-    ${qc.signatureImage?`<img src="${esc(qc.signatureImage)}" alt="Homeowner signature" style="background:#fff;border:1px solid var(--border);border-radius:10px;width:100%;max-width:260px;margin-top:12px">`:""}
+    ${safeUrl(qc.signatureImage,"img")?`<img src="${esc(safeUrl(qc.signatureImage,"img"))}" alt="Homeowner signature" style="background:#fff;border:1px solid var(--border);border-radius:10px;width:100%;max-width:260px;margin-top:12px">`:""}
     <div class="hint" style="margin-top:6px">Signed by ${esc(qc.signedName||"homeowner")} · ${esc(fmtDateOnly(qc.at))}<br>${esc(qc.policyVersion||"")}</div>
     <div class="hint mt">Scanning opens this passport for your company's authorized technicians only.</div>
     ${can.qr()?`<button class="btn danger sm mt" id="wd">Record homeowner withdrawal</button>`:""}</div>`
@@ -1967,19 +2309,31 @@ function qrCard(e){
     <p class="hint">No QR exists for this unit. One is created only after the homeowner signs to approve sharing this equipment's information, so nothing is placed on their equipment without their knowledge.</p>
     ${can.qr()?`<button class="btn primary mt" id="rq">${icon("pencil","sm")} ${e.qrStatus==="declined"||e.qrStatus==="withdrawn"?"Ask again":"Get homeowner signature"}</button>`:""}</div>`);
   $("#rq", card)?.addEventListener("click", ()=>qrConsentForm(e));
-  $("#wd", card)?.addEventListener("click", async ()=>{
+  const wd = $("#wd", card);
+  wd?.addEventListener("click", withBusy(wd, async ()=>{
     if (!(await confirmBox("Deactivate QR?", "Use this when the homeowner asks to stop sharing. The QR stops working right away and the withdrawal is recorded.", "Deactivate", true))) return;
-    await saveQr(e, {qrStatus:"withdrawn", qrToken:null, qrConsent:{result:"withdrawn", method:qc.method||"Signature", policyVersion:QR_CONSENT_VERSION, at:now(), recordedBy:me()?.name||""}}, {method:qc.method||"Signature", result:"withdrawn"});
-    toast("QR deactivated."); render();
-  });
+    const ok = await saveQr(e, {qrStatus:"withdrawn", qrToken:null, qrConsent:{result:"withdrawn", method:qc.method||"Signature", policyVersion:QR_CONSENT_VERSION, at:now(), recordedBy:me()?.name||""}}, {method:qc.method||"Signature", result:"withdrawn"});
+    if (ok) toast("QR deactivated.");
+    render();
+  }));
   if (active) setTimeout(()=>{ const box = $("#qrbox", card); if (!box) return; if (window.QRCode) new QRCode(box, {text:"saferoutine://equipment/"+e.qrToken, width:170, height:170}); else box.textContent = e.qrToken; }, 0);
   return card;
 }
 function newToken(){ const a = new Uint8Array(16); crypto.getRandomValues(a); return Array.from(a, b=>b.toString(16).padStart(2,"0")).join(""); }
+/* Writes first, changes local state only after success. Returns true/false.
+   Approval: the consent record is written first, so a QR is never active without its signed record.
+   Decline / withdrawal: the equipment is updated first, so the QR stops working even if the record write then fails. */
 async function saveQr(e, patch, rec){
-  Object.assign(e, patch); await writeDoc("equipment/"+e.id, patch, true);
   const r = Object.assign({type:"qr_activation", equipmentId:e.id, policyVersion:QR_CONSENT_VERSION, at:now(), by:me()?.name||""}, rec);
-  const id = await addDoc("consent", r); S.consent.push(Object.assign({id:id||uid("c")}, r));
+  const writeRecord = async msg=>{ const id = await addDoc("consent", r, msg); if (id) S.consent.push(Object.assign({id}, r)); return !!id; };
+  if (patch.qrStatus==="active"){
+    if (!(await writeRecord())) return false;
+    if (!(await writeDoc("equipment/"+e.id, patch, true))) return false;
+    Object.assign(e, patch); return true;
+  }
+  if (!(await writeDoc("equipment/"+e.id, patch, true))) return false;
+  Object.assign(e, patch);
+  return await writeRecord("The QR status was saved, but the consent record couldn't be written. Record it again.");
 }
 function qrConsentForm(e){
   const text = `By signing, you allow information about your ${e.type||"equipment"} (${e.manufacturer||""} ${e.model||""}) to be kept and shared in SafeRoutine: make, model, serial number, service history and photos. A QR code placed on the equipment opens that private page. Only you, the service company that placed it, and technicians that company authorizes can open it. You can withdraw your approval at any time and the QR will stop working. If you say no, nothing is shared, no QR is placed, and the work continues as normal.`;
@@ -1998,18 +2352,19 @@ function qrConsentForm(e){
   cv.addEventListener("pointermove", ev=>{ if (!drawing) return; const [x,y] = pos(ev); ctx.lineTo(x,y); ctx.stroke(); });
   ["pointerup","pointercancel","pointerleave"].forEach(t=>cv.addEventListener(t, ()=>drawing=false));
   $("#clr", b).addEventListener("click", ()=>{ ctx.clearRect(0,0,cv.width,cv.height); inked = false; });
-  $("#no", b).addEventListener("click", async ()=>{
-    await saveQr(e, {qrStatus:"declined", qrToken:null, qrConsent:{result:"declined", method:"Signature", policyVersion:QR_CONSENT_VERSION, at:now(), recordedBy:me()?.name||""}}, {method:"Signature", result:"declined"});
+  const noBtn = $("#no", b), yesBtn = $("#yes", b);
+  noBtn.addEventListener("click", withBusy([noBtn, yesBtn], async ()=>{
+    if (!(await saveQr(e, {qrStatus:"declined", qrToken:null, qrConsent:{result:"declined", method:"Signature", policyVersion:QR_CONSENT_VERSION, at:now(), recordedBy:me()?.name||""}}, {method:"Signature", result:"declined"}))) return;
     closeOverlay(); toast("Recorded: homeowner declined. Nothing is shared and no QR was created."); render();
-  });
-  $("#yes", b).addEventListener("click", async ()=>{
+  }));
+  yesBtn.addEventListener("click", withBusy([yesBtn, noBtn], async ()=>{
     const name = $("#nm", b).value.trim();
     if (!name) return toast("Type the homeowner's full name.","bad");
     if (!inked) return toast("The homeowner needs to sign in the box.","bad");
     if (!$("#ag", b).checked) return toast("Tick the box to confirm.","bad");
-    await saveQr(e, {qrStatus:"active", qrToken:newToken(), qrConsent:{result:"approved", method:"Signature", policyVersion:QR_CONSENT_VERSION, signedName:name, signatureImage:cv.toDataURL("image/png"), at:now(), requestedBy:me()?.name||""}}, {method:"Signature", result:"approved", signedName:name});
+    if (!(await saveQr(e, {qrStatus:"active", qrToken:newToken(), qrConsent:{result:"approved", method:"Signature", policyVersion:QR_CONSENT_VERSION, signedName:name, signatureImage:cv.toDataURL("image/png"), at:now(), requestedBy:me()?.name||""}}, {method:"Signature", result:"approved", signedName:name}))) return;
     closeOverlay(); toast("Signed. The QR is now active."); render();
-  });
+  }));
 }
 
 /* ------------------------------ CUSTOMERS (internal) ------------------------------ */
@@ -2039,10 +2394,11 @@ function customerForm(c){
     <div class="field" style="grid-column:1/-1"><label>Internal notes</label><textarea name="notes" placeholder="Access, pets, preferred times…">${esc(c?.notes||"")}</textarea></div></div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
-  b.addEventListener("submit", async e=>{
-    e.preventDefault(); const d = {name:b.name.value.trim(), address:b.address.value.trim(), phone:b.phone.value.trim(), email:b.email.value.trim(), notes:b.notes.value.trim()};
-    if (c){ await writeDoc("customers/"+c.id, d, true); Object.assign(c, d); closeOverlay(); toast("Saved."); render(); return; }
-    const id = uid("cust"); d.createdAt = now(); await writeDoc("customers/"+id, d); S.customers.push(Object.assign({id}, d)); closeOverlay(); toast("Customer added."); openCustomer(id);
+  onSubmit(b, async ()=>{
+    const d = {name:b.name.value.trim(), address:b.address.value.trim(), phone:b.phone.value.trim(), email:b.email.value.trim(), notes:b.notes.value.trim()};
+    if (!d.name){ toast("Enter the customer's name.","bad"); return; }
+    if (c){ if (!(await writeDoc("customers/"+c.id, d, true))) return; Object.assign(c, d); closeOverlay(); toast("Saved."); render(); return; }
+    const id = uid("cust"); d.createdAt = now(); if (!(await writeDoc("customers/"+id, d))) return; S.customers.push(Object.assign({id}, d)); closeOverlay(); toast("Customer added."); openCustomer(id);
   });
 }
 function renderCustomerDetail(id){
@@ -2054,7 +2410,7 @@ function renderCustomerDetail(id){
   const g = el(`<div class="grid g-main"><div class="stack" id="l"></div><div class="stack" id="r"></div></div>`);
   $("#r", g).appendChild(el(`<div class="card"><div class="card-h"><h3>Contact</h3></div><div class="stack tight">
     ${c.phone?`<a class="btn" href="tel:${esc(c.phone)}">${icon("phone","sm")} ${esc(c.phone)}</a>`:""}${c.email?`<a class="btn" href="mailto:${esc(c.email)}">${icon("send","sm")} ${esc(c.email)}</a>`:""}
-    ${c.address?`<a class="btn" href="${esc(mapsUrl(c.address))}" target="_blank" rel="noopener">${icon("nav","sm")} Directions</a>`:""}${c.notes?`<div class="note">${esc(c.notes)}</div>`:""}</div></div>`));
+    ${c.address?`<a class="btn" href="${esc(mapsUrl(c.address))}" target="_blank" rel="noopener noreferrer">${icon("nav","sm")} Directions</a>`:""}${c.notes?`<div class="note">${esc(c.notes)}</div>`:""}</div></div>`));
   const eqs = S.equipment.filter(e=>e.siteCustomerId===c.id);
   const ec = el(`<div class="card"><div class="card-h"><h3>Equipment</h3><button class="btn sm" id="ae">${icon("plus","sm")} Add</button></div><div class="stack tight" id="el"></div></div>`);
   $("#ae", ec).addEventListener("click", ()=>equipmentForm(null, c.id));
@@ -2077,7 +2433,7 @@ function renderArchive(){
       <div class="field"><label>From</label><input type="date" id="from" value="${esc(f.from)}"></div>
       <div class="field"><label>To</label><input type="date" id="to" value="${esc(f.to)}"></div>
       <div class="field"><label>Job type</label><select id="type"><option value="">All types</option>${JOB_TYPES.map(t=>`<option value="${t}" ${f.type===t?"selected":""}>${cap(t)}</option>`).join("")}</select></div>
-      ${own?"":`<div class="field"><label>Technician</label><select id="tech"><option value="">Everyone</option>${techs.map(t=>`<option value="${t}" ${f.tech===t?"selected":""}>${esc(userById(t)?.name||t)}</option>`).join("")}</select></div>`}
+      ${own?"":`<div class="field"><label>Technician</label><select id="tech"><option value="">Everyone</option>${techs.map(t=>`<option value="${esc(t)}" ${f.tech===t?"selected":""}>${esc(userById(t)?.name||t)}</option>`).join("")}</select></div>`}
       <div><button class="btn ghost" id="clr">Clear filters</button></div></div></div>
     <div class="row between mt" style="margin-bottom:10px"><span class="hint" id="cnt"></span></div><div id="res"></div></div>`);
   let current = [];
@@ -2110,15 +2466,19 @@ function expenseTable(list){
   if (!list.length) return el(`<div class="card">${emptyState("receipt","Nothing here.")}</div>`);
   const t = el(`<div class="card pad0"><div class="tablewrap"><table><thead><tr><th>Job</th><th>Item</th><th>Amount</th><th>By</th><th>Receipt</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></div>`);
   list.forEach(({job,item})=>{
-    const tr = el(`<tr><td><a href="#" class="mono">${esc(job.refNumber)}</a></td><td><b>${esc(item.description)}</b><div class="tiny faint">${esc(item.qty)} × ${money(item.unitCost)} · ${esc(item.source||"")}</div>${item.reply?`<div class="tiny">Tech reply: ${esc(item.reply)}</div>`:""}</td><td class="mono">${money(lineTotal(item))}</td><td>${esc(item.by||"")}</td><td>${item.receiptUrl?`<a href="${esc(item.receiptUrl)}" target="_blank" rel="noopener">View</a>`:`<span class="pill nodot warn">None</span>`}</td><td>${expensePill(item.status)}</td><td class="act"></td></tr>`);
+    const tr = el(`<tr><td><a href="#" class="mono">${esc(job.refNumber)}</a></td><td><b>${esc(item.description)}</b><div class="tiny faint">${esc(item.qty)} × ${money(item.unitCost)} · ${esc(item.source||"")}</div>${item.reply?`<div class="tiny">Tech reply: ${esc(item.reply)}</div>`:""}</td><td class="mono">${money(lineTotal(item))}</td><td>${esc(item.by||"")}</td><td>${item.receiptUrl?(safeUrl(item.receiptUrl,"href")?`<a href="${esc(safeUrl(item.receiptUrl,"href"))}" target="_blank" rel="noopener noreferrer">View</a>`:`<span class="pill nodot slate" title="Stored, but this link type can't be opened here">Stored</span>`):`<span class="pill nodot warn">None</span>`}</td><td>${expensePill(item.status)}</td><td class="act"></td></tr>`);
     $("a", tr).addEventListener("click", e=>{ e.preventDefault(); openJob(job.id, "materials"); });
     if (can.expenses() && (item.status||"pending")==="pending"){
       const a = el(`<button class="btn go sm">Approve</button>`), r = el(`<button class="btn danger sm">Reject</button>`), q = el(`<button class="btn sm">Ask</button>`);
-      a.addEventListener("click", ()=>decideExpense(job, item, "approved"));
-      r.addEventListener("click", ()=>decideExpense(job, item, "rejected"));
+      a.addEventListener("click", withBusy([a, r, q], ()=>decideExpense(job, item, "approved")));
+      r.addEventListener("click", withBusy([r, a, q], ()=>decideExpense(job, item, "rejected")));
       q.addEventListener("click", ()=>{
         const b = el(`<form>${modalHead("Ask the technician", item.description)}<div class="field"><label>Your question *</label><textarea name="m" required placeholder="e.g. Can you add the supplier receipt?"></textarea></div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Send</button></div></form>`);
-        showModal(b); b.addEventListener("submit", ev=>{ ev.preventDefault(); decideExpense(job, item, "clarify", b.m.value.trim()); closeOverlay(); });
+        showModal(b);
+        onSubmit(b, async ()=>{
+          const m = b.m.value.trim(); if (!m){ toast("Type your question first.","bad"); return; }
+          if (await decideExpense(job, item, "clarify", m)) closeOverlay();
+        });
       });
       $(".act", tr).append(el(`<div class="row"></div>`)); $(".act .row", tr).append(a, q, r);
     }
@@ -2128,11 +2488,13 @@ function expenseTable(list){
 }
 async function decideExpense(job, item, status, msg){
   const patch = {status, decidedBy:me()?.name||"Accounting", decidedAt:now()}; if (msg) patch.clarifyMsg = msg;
-  await writeDoc("jobs/"+job.id+"/materials/"+item.id, patch, true); Object.assign(item, patch);
+  if (!(await writeDoc("jobs/"+job.id+"/materials/"+item.id, patch, true))) return false;
+  Object.assign(item, patch);
   const to = S.users.find(u=>u.id===item.byId || u.name===item.by);
   const text = status==="clarify" ? `Accounting has a question about “${item.description}” on ${job.refNumber}: ${msg}` : `Expense “${item.description}” on ${job.refNumber} was ${status}.`;
   await notify(text, to?{toUser:to.id, jobId:job.id}:{toRole:"technician", jobId:job.id});
   toast(status==="clarify"?"Question sent.":`Expense ${status}.`); render();
+  return true;
 }
 function renderExpenses(){
   const all = allExpenses(); const f = S.ui.expenseFilter;
@@ -2162,7 +2524,7 @@ function renderReports(){
   const g = el(`<div class="grid g2 mt2"><div class="card"><div class="card-h"><h3>Jobs closed per week</h3><span class="hint">last 8 weeks</span></div><div class="bars">${weeks.map(w=>`<div class="b"><span class="n">${w.n}</span><div class="v" style="height:${w.n/max*100}%"></div><span class="l">${esc(w.l)}</span></div>`).join("")}</div></div>
     <div class="card"><div class="card-h"><h3>Closed jobs by technician</h3></div><div id="bt"></div></div>
     <div class="card"><div class="card-h"><h3>Jobs by type</h3><span class="hint">all time</span></div><div id="ty"></div></div>
-    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>j.leakTest?.status==="completed").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono">${S.jobs.filter(j=>/Fail/.test(j.leakTest?.result||"")).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(e=>maintenanceDue(e)?.overdue).length}</div></div></div></div></div>`);
+    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>j.leakTest?.status==="completed").length}</div></div><div><div class="k">Leak tests passed</div><div class="v mono">${S.jobs.filter(j=>leakResultKind(j.leakTest)==="pass").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono" style="color:var(--bad)">${S.jobs.filter(j=>leakResultKind(j.leakTest)==="fail").length}</div></div><div><div class="k">Leak tests inconclusive / unknown</div><div class="v mono" style="color:var(--warn)">${S.jobs.filter(j=>["inconclusive","unknown"].includes(leakResultKind(j.leakTest))).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(e=>maintenanceDue(e)?.overdue).length}</div></div></div></div></div>`);
   const hb = (rows)=>{ const m = Math.max(1, ...rows.map(r=>r[1])); return rows.length ? rows.map(([l,n])=>`<div class="hbar"><span>${esc(l)}</span><div class="track"><div style="width:${n/m*100}%"></div></div><span class="mono">${n}</span></div>`).join("") : `<div class="hint">No data yet.</div>`; };
   $("#bt", g).innerHTML = hb(fieldUsers().map(u=>[u.name, closed.filter(j=>j.technicianId===u.id).length]).sort((a,b)=>b[1]-a[1]));
   $("#ty", g).innerHTML = hb(JOB_TYPES.map(t=>[cap(t), S.jobs.filter(j=>j.jobType===t).length]).filter(r=>r[1]>0).sort((a,b)=>b[1]-a[1]));
@@ -2183,13 +2545,13 @@ function renderTeam(){
   return wrap;
 }
 function userForm(u){
-  const creds = (u?.credentials||[]).slice();
+  const creds = (u?.credentials||[]).map(c=>Object.assign({}, c)); /* deep copy: typing must not change the saved user until Save succeeds */
   const b = el(`<form>${modalHead(u?"Edit "+u.name:"Add person", u?"":"In the real app this sends a sign-in invite.")}<div class="grid g2">
     <div class="field"><label>Full name *</label><input name="name" required value="${esc(u?.name||"")}"></div>
     <div class="field"><label>Email</label><input name="email" type="email" value="${esc(u?.email||"")}"></div>
     <div class="field"><label>Role *</label><select name="role">${Object.entries(ROLE_LABELS).map(([k,v])=>`<option value="${k}" ${u?.role===k?"selected":""}>${v}</option>`).join("")}</select></div>
     <div class="field"><label>Trade</label><select name="trade">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${u?.trade===k?"selected":""}>${v.label}</option>`).join("")}</select></div>
-    <div class="field" style="grid-column:1/-1"><label>Supervisor (for apprentices)</label><select name="supervisorId"><option value="">—</option>${activeUsers().filter(x=>x.role==="supervisor"||x.role==="owner").map(x=>`<option value="${x.id}" ${u?.supervisorId===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div></div>
+    <div class="field" style="grid-column:1/-1"><label>Supervisor (for apprentices)</label><select name="supervisorId"><option value="">—</option>${activeUsers().filter(x=>x.role==="supervisor"||x.role==="owner").map(x=>`<option value="${esc(x.id)}" ${u?.supervisorId===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div></div>
     <h4 class="mt2" style="margin-bottom:8px">Licences &amp; certificates</h4><div class="stack tight" id="cl"></div>
     <button type="button" class="btn sm mt" id="ac">${icon("plus","sm")} Add licence</button>
     ${u?`<label class="check mt"><input type="checkbox" name="active" ${u.active!==false?"checked":""}><span>Active (unticking removes them from scheduling but keeps their history)</span></label>`:""}
@@ -2201,11 +2563,17 @@ function userForm(u){
   drawC();
   $("#ac", b).addEventListener("click", ()=>{ creds.push({name:"", number:"", expires:""}); drawC(); });
   showModal(b, {wide:true});
-  b.addEventListener("submit", async e=>{
-    e.preventDefault();
-    const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null, credentials:creds.filter(c=>c.name.trim())};
-    if (u){ d.active = b.active.checked; await writeDoc("users/"+u.id, d, true); Object.assign(u, d); }
-    else { const id = uid("user"); d.active = true; d.createdAt = now(); await writeDoc("users/"+id, d); S.users.push(Object.assign({id}, d)); }
+  onSubmit(b, async ()=>{
+    const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null, credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()}))};
+    if (!d.name){ toast("Enter the person's full name.","bad"); return; }
+    if (u){
+      d.active = b.active.checked;
+      if (!(await writeDoc("users/"+u.id, d, true))) return;
+      Object.assign(u, d);
+      /* If you edited the person you're viewing as, keep the role in step (or pick someone else if deactivated). */
+      if (u.id===S.userId){ closeOverlay(); toast("Saved."); if (u.active===false || !ROLE_LABELS[u.role]) restoreUser(); else { S.role = u.role; lsSet("sr_role", u.role); render(); } return; }
+    }
+    else { const id = uid("user"); d.active = true; d.createdAt = now(); if (!(await writeDoc("users/"+id, d))) return; S.users.push(Object.assign({id}, d)); }
     closeOverlay(); toast("Saved."); render();
   });
 }
@@ -2253,13 +2621,22 @@ function renderSettings(){
       <div class="field"><label>Default display</label><select name="theme"><option value="system" ${S.config.theme==="system"?"selected":""}>Match device</option><option value="light" ${S.config.theme==="light"?"selected":""}>Light</option><option value="dark" ${S.config.theme==="dark"?"selected":""}>Dark</option></select></div>
       <div class="hint">Each person can still switch light/dark for themselves with the button at the top.</div>
       <div class="mf" style="margin-top:4px"><button class="btn primary">Save</button></div></div></form>`);
-    f.addEventListener("submit", async e=>{ e.preventDefault(); Object.assign(S.config, {companyName:f.companyName.value.trim(), activeTheme:f.activeTheme.value, theme:f.theme.value}); if (!S.config.trades.includes(f.activeTheme.value)) S.config.trades.push(f.activeTheme.value); await writeDoc("app/config", S.config); toast("Saved."); render(); });
+    onSubmit(f, async ()=>{
+      const next = {companyName:f.companyName.value.trim(), activeTheme:f.activeTheme.value, theme:f.theme.value};
+      const patch = {}; Object.keys(next).forEach(k=>{ if (S.config[k]!==next[k]) patch[k] = next[k]; });
+      const trades = Array.isArray(S.config.trades) ? S.config.trades : [];
+      if (!trades.includes(next.activeTheme)) patch.trades = trades.concat(next.activeTheme);
+      if (!Object.keys(patch).length){ toast("Nothing changed."); return; }
+      if (!(await writeConfig(patch))) return;
+      Object.assign(S.config, patch); toast("Saved."); render();
+    });
     box.appendChild(f);
   } else if (t==="modules"){
     [["leakTest","Leak test","Record or skip a leak test on each job. Part of the closing checklist when on."],["skillPassport","Skill passport","Apprentices see their experience record."],["gps","Location","Show technician location only while on an active job. Off by default."]].forEach(([k,l,d])=>{
       const on = !!S.config.modules[k];
       const r = el(`<div class="card row between" style="margin-bottom:10px"><div><b>${esc(l)}</b><div class="hint">${esc(d)}</div></div><button class="btn ${on?"go":""} sm">${on?"On":"Off"}</button></div>`);
-      $("button", r).addEventListener("click", async ()=>{ S.config.modules[k] = !on; await writeDoc("app/config", S.config); toast(`${l} turned ${!on?"on":"off"}.`); render(); });
+      const tb = $("button", r);
+      tb.addEventListener("click", withBusy(tb, async ()=>{ const modules = Object.assign({}, S.config.modules, {[k]:!on}); if (!(await writeConfig({modules}))) return; S.config.modules = modules; toast(`${l} turned ${!on?"on":"off"}.`); render(); }));
       box.appendChild(r);
     });
   } else {
@@ -2272,7 +2649,7 @@ function renderSettings(){
       <div class="field"><label>Policy shown to technicians</label><textarea name="notes">${esc(p.notes)}</textarea></div>
       <div class="hint">Version ${esc(p.version||1)}${p.updatedAt?" · updated "+esc(fmtDateOnly(p.updatedAt)):""}</div>
       <div class="mf" style="margin-top:4px"><button class="btn primary">Save policy</button></div></div></form>`);
-    f.addEventListener("submit", async e=>{ e.preventDefault(); S.config.gpsPolicy = {enabled:f.enabled.checked, activeJobOnly:f.activeJobOnly.checked, scope:f.scope.value.trim(), notes:f.notes.value.trim(), version:(p.version||1)+1, updatedAt:now()}; await writeDoc("app/config", S.config); await notify("The location policy was updated. Please read it.", {toRole:"all"}); toast("Policy saved."); render(); });
+    onSubmit(f, async ()=>{ const gpsPolicy = {enabled:f.enabled.checked, activeJobOnly:f.activeJobOnly.checked, scope:f.scope.value.trim(), notes:f.notes.value.trim(), version:(p.version||1)+1, updatedAt:now()}; if (!(await writeConfig({gpsPolicy}))) return; S.config.gpsPolicy = gpsPolicy; await notify("The location policy was updated. Please read it.", {toRole:"all"}); toast("Policy saved."); render(); });
     box.appendChild(f);
   }
   return wrap;
@@ -2329,14 +2706,21 @@ function renderFeedback(){
   $("#add", wrap).addEventListener("click", ()=>{
     const b = el(`<form>${modalHead("Send feedback")}<div class="field"><label>Type</label><select name="category"><option>Missing field</option><option>Workflow</option><option>Bug</option><option>Idea</option></select></div><div class="field mt"><label>Details *</label><textarea name="text" required></textarea></div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Send</button></div></form>`);
     showModal(b);
-    b.addEventListener("submit", async e=>{ e.preventDefault(); const rec = {category:b.category.value, text:b.text.value.trim(), status:"New", by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()}; const id = await addDoc("feedback", rec); S.feedback.push(Object.assign({id:id||uid("fb")}, rec)); await notify(`New feedback from ${rec.by}.`, {toRole:"owner"}); closeOverlay(); toast("Thanks — sent."); render(); });
+    onSubmit(b, async ()=>{ const text = b.text.value.trim(); if (!text){ toast("Type the details first.","bad"); return; } const rec = {category:b.category.value, text, status:"New", by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()}; const id = await addDoc("feedback", rec); if (!id) return; S.feedback.push(Object.assign({id}, rec)); await notify(`New feedback from ${rec.by}.`, {toRole:"owner"}); closeOverlay(); toast("Thanks — sent."); render(); });
   });
   const list = S.feedback.slice().sort((a,b)=>ts(b.at)-ts(a.at));
   if (!list.length) $("#l", wrap).appendChild(el(`<div class="card">${emptyState("message","No feedback yet.")}</div>`));
   list.forEach(f=>{
     const st = f.status||"New"; const cls = st==="Implemented"?"ok":st==="Planned"?"info":["Declined","Duplicate"].includes(st)?"slate":"warn";
     const c = el(`<div class="card"><div class="row between wrap"><b>${esc(f.category||"General")}</b>${S.role==="owner"?`<select class="in" style="width:auto">${FEEDBACK_STATUSES.map(s=>`<option ${/^under/i.test(st)&&/^Under/.test(s)||s===st?"selected":""}>${s}</option>`).join("")}</select>`:`<span class="pill ${cls}">${esc(st)}</span>`}</div><p style="margin-top:6px">${esc(f.text)}</p><div class="hint mt">${esc(f.by)} · ${esc(ago(f.at))}</div></div>`);
-    $("select", c)?.addEventListener("change", async e=>{ f.status = e.target.value; await writeDoc("feedback/"+f.id, {status:f.status}, true); toast("Status updated."); renderSide(); });
+    $("select", c)?.addEventListener("change", async e=>{
+      const sel = e.target, prev = f.status||"New", next = sel.value;
+      if (sel.dataset.busy) return; sel.dataset.busy = "1"; sel.disabled = true;
+      try{
+        if (await writeDoc("feedback/"+f.id, {status:next}, true)){ f.status = next; toast("Status updated."); renderSide(); }
+        else sel.value = prev; /* show the saved value again */
+      }finally{ delete sel.dataset.busy; sel.disabled = false; }
+    });
     $("#l", wrap).appendChild(c);
   });
   return wrap;
@@ -2426,5 +2810,3 @@ boot();
 </script>
 </body>
 </html>
-
-</body></html>
