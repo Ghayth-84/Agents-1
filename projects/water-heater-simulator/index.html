@@ -503,15 +503,15 @@ function render(){
   wire();if(mode==='operate')liveOperate();
   if(mode!==shownMode){shownMode=mode;panel.scrollTop=0;}
 }
-let holdPid=null,holdKey=false;
-function release(e){if(!S.holding)return;if(e&&e.pointerId!=null&&holdPid!=null&&e.pointerId!==holdPid)return;
+let holdPid=null,holdKey=false;const PILOT_OUT='Pilot out — gas to the pilot was shut off. Wait out the 5 min again.';
+function release(e){if(!S.holding)return;if(e&&e.pointerId!=null&&(holdKey||e.pointerId!==holdPid))return; // keyboard holds ignore pointer events
   // decide now (same rule step() applies next frame), not from S.pilot later
   const holds=S.pilot&&S.gas&&S.knob!=='OFF'&&safetyHeld();
   S.holding=false;holdPid=null;holdKey=false;
   if(holds){setMsg(S.knob==='ON'?'Pilot stayed lit. Knob is ON — thermostat now controls the burner.':'Pilot stayed lit. Now turn the knob to ON.');return;}
   // any release before the thermocouple is hot (the pilot lights on the first frame of a hold, so this covers every short tap)
   S.pilot=false;startPurge();
-  setMsg(!S.gas||S.knob==='OFF'?'Pilot out — gas to the pilot was shut off. Wait out the 5 min again.':
+  setMsg(!S.gas||S.knob==='OFF'?PILOT_OUT:
     S.tc<=.6?'Pilot did not stay lit when you released the knob — thermocouple not hot enough yet (or a safety fault such as an open ECO). Turn the knob OFF, wait out the 5 min again, then hold longer.':
     'Pilot did not stay lit when you released the knob — a safety fault (open ECO, failed thermocouple or FVIR switch) closed the safety valve. Turn the knob OFF and wait out the 5 min again.');}
 addEventListener('pointerup',release);addEventListener('pointercancel',release);addEventListener('blur',()=>release());
@@ -523,10 +523,10 @@ function wire(){
   if(q('#back'))q('#back').onclick=()=>selectPart(null);
   if(q('#tour'))q('#tour').onclick=()=>{const k=Object.keys(PARTS);selectPart(k[(k.indexOf(sel)+1)%k.length]);};
   if(q('#cut'))q('#cut').onclick=()=>{cutOn=!cutOn;clipMats.forEach(m=>{m.clippingPlanes=cutOn?clips:[];m.needsUpdate=true;});render();};
-  if(q('#gas'))q('#gas').onclick=()=>{S.gas=!S.gas;if(!S.gas&&S.pilot){S.pilot=false;startPurge();}render();};
+  if(q('#gas'))q('#gas').onclick=()=>{S.gas=!S.gas;if(!S.gas&&S.pilot){S.pilot=false;startPurge();S.msg=PILOT_OUT;}render();};
   qa('[data-k]').forEach(b=>b.onclick=()=>{const k=b.dataset.k;
-    if(k==='OFF'&&S.pilot){startPurge();S.pilot=false;} // pilot out → full 5 min; otherwise the paused countdown just resumes
-    if(k==='ON'&&!S.pilot)S.msg='Knob is ON but pilot is out — no gas will flow to the burner.';else S.msg='';
+    if(k==='OFF'&&S.pilot){startPurge();S.pilot=false;S.msg=PILOT_OUT;} // pilot out → full 5 min; otherwise the paused countdown just resumes
+    else if(k==='ON'&&!S.pilot)S.msg='Knob is ON but pilot is out — no gas will flow to the burner.';else S.msg='';
     S.knob=k;render();});
   const L=q('#light');
   if(L){const down=e=>{e.preventDefault();if(S.holding)return;
@@ -587,7 +587,9 @@ canvas.addEventListener('pointerup',e=>{const d0=downs.get(e.pointerId);downs.de
    ========================================================= */
 function tcol(t){const k=Math.min(1,Math.max(0,(t-50)/(170-50)));return new THREE.Color().setHSL(.62*(1-k),.85,.5);}
 let fitted=false,userCam=false; // refit on resize until the user orbits/zooms
-if(controls.addEventListener)controls.addEventListener('start',()=>{userCam=true;});
+let camP0=null; // a tap fires start/end too: only a real orbit/pan/zoom (camera moved) stops the refit
+if(controls.addEventListener){controls.addEventListener('start',()=>{camP0=camera.position.clone();});
+  controls.addEventListener('end',()=>{if(camP0&&camera.position.distanceTo(camP0)>1e-3)userCam=true;camP0=null;});}
 const FIT_Y0=0,FIT_Y1=7.1,FIT_W=3.4; // heater bounds: floor → vent top, width
 function resize(){const w=innerWidth,h=innerHeight;if(!w||!h)return;if(renderer)renderer.setSize(w,h,false);camera.aspect=w/h;
   // centre the view in the band between the top bar and the panel (panel max-height 46vh; resize() runs before the first render)
