@@ -38,6 +38,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg); color:var(--text); font-family:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14.5px; line-height:1.45; -webkit-font-smoothing:antialiased}
 .mono{font-family:"JetBrains Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; letter-spacing:-.01em}
@@ -72,7 +73,7 @@ svg.i.lg{width:22px; height:22px}
 .navsec{font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:#6f84a9; padding:14px 11px 6px; font-weight:700}
 .rolecard{margin-top:12px; background:var(--navy2); border:1px solid var(--navy-line); border-radius:12px; padding:10px}
 .rolecard label{display:block; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:#8da0c2; margin-bottom:6px; font-weight:700}
-.rolecard select{width:100%; background:#0a1426; color:#fff; border:1px solid var(--navy-line); border-radius:8px; padding:8px}
+.rolecard select{width:100%; background:#0a1426; color:#fff; border:1px solid var(--navy-line); border-radius:8px; padding:8px; font-size:13px; text-overflow:ellipsis}
 .rolecard .who{display:flex; align-items:center; gap:9px; margin-top:9px}
 .rolecard .who .nm{font-weight:700; color:#fff; font-size:13.5px}
 .rolecard .who .rl{font-size:11.5px; color:#8da0c2}
@@ -86,7 +87,8 @@ svg.i.lg{width:22px; height:22px}
 .iconbtn{position:relative; display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 .iconbtn:hover{background:var(--surface2)}
 .iconbtn .dot{position:absolute; top:-5px; right:-5px; background:var(--brand-red); color:#fff; font-size:10.5px; font-weight:700; border-radius:20px; padding:1px 6px; border:2px solid var(--bg)}
-#banner{margin:14px 24px 0; padding:9px 13px; border-radius:10px; background:color-mix(in srgb, var(--warn) 12%, var(--surface)); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); color:var(--text); font-size:13px; display:flex; gap:8px; align-items:center}
+#banner{margin:14px 24px 0; padding:9px 13px; border-radius:10px; background:color-mix(in srgb, var(--warn) 12%, var(--surface)); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); color:var(--text); font-size:13px; display:flex; flex-direction:column; gap:6px}
+#banner .bl{display:flex; gap:8px; align-items:flex-start}
 #main{padding:20px 24px 90px; max-width:1280px; width:100%}
 #tabbar{display:none}
 
@@ -203,7 +205,7 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 .hero .btn.go{background:#18a35e; border-color:#18a35e}
 
 /* ---------- stepper ---------- */
-.steps{display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin:16px 0 4px}
+.steps{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:6px; margin:16px 0 4px}
 .steps .s{display:flex; flex-direction:column; gap:6px}
 .steps .bar{height:6px; border-radius:6px; background:var(--surface3)}
 .steps .s.done .bar{background:var(--ok)}
@@ -216,8 +218,8 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 .tabs::-webkit-scrollbar{display:none}
 .tabs button{display:inline-flex; align-items:center; gap:7px; border:0; background:none; padding:10px 12px; font-weight:650; color:var(--text-dim); border-bottom:2px solid transparent; white-space:nowrap; margin-bottom:-1px}
 .tabs button.active{color:var(--text); border-color:var(--primary)}
-.seg{display:inline-flex; background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:3px; gap:2px}
-.seg button{border:0; background:transparent; padding:6px 11px; border-radius:7px; font-weight:650; font-size:13px; color:var(--text-dim); display:inline-flex; gap:6px; align-items:center}
+.seg{display:inline-flex; background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:3px; gap:2px; max-width:100%; overflow-x:auto}
+.seg button{border:0; background:transparent; padding:6px 11px; border-radius:7px; font-weight:650; font-size:13px; color:var(--text-dim); display:inline-flex; gap:6px; align-items:center; white-space:nowrap; flex:none}
 .seg button.active{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 
 /* ---------- timeline ---------- */
@@ -243,13 +245,11 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 .thumb{position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--border); background:var(--surface2); aspect-ratio:4/3; cursor:zoom-in}
 .thumb img,.thumb video{width:100%; height:100%; object-fit:cover; display:block}
 .thumb .cap{position:absolute; left:6px; bottom:6px; font-size:11px; font-weight:700; background:rgba(8,16,34,.72); color:#fff; padding:2px 7px; border-radius:20px}
-.confbar{height:7px; border-radius:7px; background:var(--surface3); overflow:hidden}
-.confbar > div{height:100%; background:linear-gradient(90deg,var(--brand-blue),var(--ok))}
 .kv{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px 18px}
 .kv .k{font-size:11.5px; color:var(--text-faint); font-weight:650; text-transform:uppercase; letter-spacing:.06em}
 .kv .v{font-weight:600; margin-top:2px; word-break:break-word}
 .readgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px}
-.lane{display:grid; grid-template-columns:170px 1fr; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border)}
+.lane{display:grid; grid-template-columns:170px minmax(0,1fr); gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border)}
 .lane:last-child{border-bottom:0}
 .chips{display:flex; gap:8px; flex-wrap:wrap}
 .chip{display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); background:var(--surface2); border-radius:10px; padding:6px 10px; font-size:12.5px; cursor:pointer}
@@ -289,22 +289,24 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 #toasts{position:fixed; z-index:200; right:18px; bottom:18px; display:flex; flex-direction:column; gap:8px; align-items:flex-end}
 .toast{background:var(--navy); color:#fff; padding:11px 15px; border-radius:12px; font-size:13.5px; box-shadow:var(--shadow-lg); max-width:340px; display:flex; gap:9px; align-items:flex-start; animation:pop .18s ease; border:1px solid var(--navy-line)}
 .toast.bad{background:#7a1d12}
+#setup{position:fixed; inset:0; z-index:150; background:var(--bg); overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:24px 16px}
+#setup .setupcard{width:min(560px,100%); margin-top:6vh}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{opacity:0; transform:translateY(6px) scale(.98)}to{opacity:1; transform:none}}
 @keyframes slide{from{transform:translateX(30px); opacity:0}to{transform:none; opacity:1}}
 @media (prefers-reduced-motion: reduce){*{animation:none!important; transition:none!important}}
 
 /* ---------- responsive ---------- */
-@media (max-width:1100px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .g-main{grid-template-columns:1fr} }
+@media (max-width:1100px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .g-main{grid-template-columns:minmax(0,1fr)} }
 @media (max-width:860px){
   #side{display:none}
   #top{padding:10px 16px}
   .searchbtn{min-width:0; width:38px; height:38px; padding:0; justify-content:center} .searchbtn span,.searchbtn kbd{display:none}
   #banner{margin:12px 16px 0}
   #main{padding:16px 16px calc(96px + env(safe-area-inset-bottom,0px))}
-  .g2,.g3{grid-template-columns:1fr}
+  .g2,.g3{grid-template-columns:minmax(0,1fr)}
   .board{grid-template-columns:repeat(6,minmax(240px,1fr))}
-  .lane{grid-template-columns:1fr}
+  .lane{grid-template-columns:minmax(0,1fr)}
   #tabbar{display:flex; position:fixed; left:0; right:0; bottom:0; z-index:40; background:var(--navy); border-top:1px solid var(--navy-line); padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
   #tabbar button{flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; border:0; background:transparent; color:#9fb0cf; font-size:10.5px; font-weight:650; padding:6px 2px; border-radius:10px; position:relative}
   #tabbar button.active{color:#fff; background:var(--navy2)}
@@ -317,7 +319,7 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
   .mobile-sticky{position:sticky; bottom:calc(76px + env(safe-area-inset-bottom,0px)); z-index:20; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(8px); padding:10px 0; margin:0 -2px}
 }
 @media (max-width:520px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .kpi .num{font-size:24px} h1{font-size:22px} .steps .lb{font-size:10px} }
-@media print{ #side,#top,#tabbar,#banner,.btn,.tabs{display:none!important} #main{padding:0} .card{box-shadow:none} }
+@media print{ #side,#top,#tabbar,.btn,.tabs{display:none!important} #main{padding:0} .card{box-shadow:none} }
 </style>
 </head>
 <body>
@@ -454,9 +456,14 @@ const JOB_TYPES = ["inspection","maintenance","repair","installation","replaceme
 const PRIORITIES = ["low","normal","high","emergency"];
 const PRIO_C = {low:"slate", normal:"info", high:"warn", emergency:"bad"};
 const FEEDBACK_STATUSES = ["New","Under review","Planned","Implemented","Declined","Duplicate"];
-const CONTEXT_OPTIONS = ["Inlet (static)","Inlet (dynamic)","Manifold","Supply","Return","High side","Low side","Ambient","Line voltage","Load side","Other"];
 const MEDIA_CATS = ["Before","After","Nameplate","Issue found","Receipt","Other"];
 const QR_CONSENT_VERSION = "qr-consent v0.1 (draft, not yet legally reviewed)";
+/* Shown on every screen until the safety rules are checked by a qualified reviewer. Set to true only after that approval. */
+const RULES_APPROVED = false;
+const RULES_WARNING = "Safety rules not yet approved against Ontario gas and building codes (TSSA). Do not use for real work.";
+/* Gas licence on each user: "none" | "G3" | "G2" | "G1" (G1 is the highest). */
+const GAS_LICENCES = ["none","G3","G2","G1"];
+const LIC_RANK = {none:0, G3:1, G2:2, G1:3};
 const AV_COLORS = ["#1f74db","#e8402f","#0f7c8c","#6d4fd8","#b26a00","#14804a","#c0267a","#475569"];
 
 /* ------------------------------ UTIL ------------------------------ */
@@ -511,7 +518,7 @@ async function downloadFile(name, text){
     return false;
   }
 }
-function toCSV(rows){ return rows.map(r=>r.map(v=>{ let s=String(v??""); if (/^[=+\-@\t\r]/.test(s)) s = "'"+s; return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\n"); }
+function toCSV(rows){ return rows.map(r=>r.map(v=>{ let s=String(v??""); if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'"+s; return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\n"); }
 function emptyState(ic, msg){ return `<div class="empty">${icon(ic)}<div>${esc(msg)}</div></div>`; }
 /* URL allow-list for anything that comes from the database.
    kind "img"   : <img src>   — https:, local blob:, data:image/*
@@ -524,6 +531,8 @@ function revokeLocalBlob(u){ if (u && LOCAL_BLOBS.has(u)){ URL.revokeObjectURL(u
 function safeUrl(u, kind){
   const s = String(u??"").trim(); if (!s) return "";
   if (/^https:\/\//i.test(s)){ try{ new URL(s); return s; }catch(e){ return ""; } }
+  /* http: only for this page's own origin (e.g. a file service on the same host). */
+  if (/^http:\/\//i.test(s)){ try{ const x = new URL(s); return x.origin===location.origin ? x.href : ""; }catch(e){ return ""; } }
   if (/^blob:/i.test(s)) return LOCAL_BLOBS.has(s) ? s : "";
   if (kind==="href") return /^data:image\/(png|jpeg|gif|webp)[;,]/i.test(s) ? s : "";
   if (/^data:image\//i.test(s)) return s;
@@ -602,8 +611,9 @@ class MemDB {
 }
 
 let db = null, assets = null, mode = "loading"; // live | preview
-const SUB = ["notes","media","extractions","materials","events","help"];
-const emptySub = ()=>({notes:[],media:[],extractions:[],materials:[],events:[],help:[]});
+/* The old "extractions" sub-collection (gauge read from a photo) is no longer read or shown. Old docs stay in the db untouched. */
+const SUB = ["notes","media","materials","events","help"];
+const emptySub = ()=>({notes:[],media:[],materials:[],events:[],help:[]});
 let S = {
   config:{ companyName:"Your Company", activeTheme:"hvac", trades:["hvac"], theme:"system",
     modules:{leakTest:true, gps:false, skillPassport:true},
@@ -626,12 +636,8 @@ async function boot(){
     mode = "live";
     const ok = await loadAll();
     if (!ok){ db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll(); }
-    else if (!S.loadErrors.length && S.configExists && S.jobs.length>0 && !S.config.seedVersion && !S.hazards.length && S.jobs.every(j=>/^JOB-100[1-5]$/.test(j.refNumber||""))){
-      /* The shared store still holds only the original example records: refresh them once to the fuller example set.
-         Only runs when every read succeeded and real job records were actually read. */
-      $("#main").innerHTML = `<div class="card">${emptyState("sparkle","Setting up the example data…")}</div>`;
-      try{ await seedPreview(); await loadAll(); }catch(e){ console.error("example refresh failed", e); }
-    }
+    /* Live db: never write example data. Empty team (and every read worked) = first start. */
+    else if (!S.loadErrors.length && !activeUsers().length){ showSetup(); return; }
   } else {
     db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll();
   }
@@ -659,9 +665,46 @@ async function loadAll(){
     return true;
   }catch(e){ console.error("loadAll failed", e); return false; }
 }
+/* First start on an empty live db: create the company and the first owner. */
+function showSetup(){
+  renderBanner();
+  const wrap = el(`<div id="setup" role="dialog" aria-modal="true" aria-labelledby="setupH"><form class="card setupcard">
+    <div class="row">${brandMark(40)}<div><h2 id="setupH">Set up SafeRoutine</h2><div class="hint">No team members yet. Create your company and your owner account.</div></div></div>
+    ${RULES_APPROVED?"":`<div class="callout warn mt">${icon("alert","sm")}<div>${esc(RULES_WARNING)}</div></div>`}
+    <div class="stack mt">
+      <div class="field"><label>Company name *</label><input name="companyName" value="${esc(S.configExists && S.config.companyName!=="Your Company" ? S.config.companyName : "")}"></div>
+      <div class="field"><label>Your name *</label><input name="name" autocomplete="name"></div>
+      <div class="field"><label>Your role</label><input value="${esc(ROLE_LABELS.owner)}" disabled></div>
+      <div class="field"><label>Gas licence (optional)</label><select name="gasLicence">${GAS_LICENCES.map(l=>`<option value="${l}">${l==="none"?"None":l}</option>`).join("")}</select></div>
+      <div class="field"><label>TSSA certificate number (optional)</label><input name="tssaCertNumber"></div>
+    </div>
+    <div class="mf"><button class="btn primary">${icon("check","sm")} Create and start</button></div></form></div>`);
+  document.body.appendChild(wrap);
+  const f = $("form", wrap);
+  setTimeout(()=>f.companyName.focus(), 30);
+  onSubmit(f, async ()=>{
+    const companyName = f.companyName.value.trim(), name = f.name.value.trim();
+    if (!companyName){ toast("Enter the company name.","bad"); return; }
+    if (!name){ toast("Enter your name.","bad"); return; }
+    /* Someone may have finished setup on another device. */
+    let snap;
+    try{ snap = await db.collection("users").get(); }catch(e){ console.error(e); toast("Couldn't check the team list. Try again.","bad"); return; }
+    if (snap.docs.some(d=>d.data()?.active!==false)){ toast("This company was already set up. Loading it now."); await loadAll(); wrap.remove(); restoreUser(); return; }
+    if (!S.configExists || S.config.companyName!==companyName){ if (!(await writeConfig({companyName}))) return; S.config.companyName = companyName; }
+    const id = uid("user");
+    const u = {name, email:"", role:"owner", trade:S.config.activeTheme||"hvac", supervisorId:null, credentials:[],
+      gasLicence:GAS_LICENCES.includes(f.gasLicence.value)?f.gasLicence.value:"none", tssaCertNumber:f.tssaCertNumber.value.trim(), address:"", active:true, createdAt:now()};
+    if (!(await writeDoc("users/"+id, u))) return;
+    const nu = Object.assign({id}, u); normalizeUser(nu); S.users.push(nu);
+    wrap.remove(); setUser(id, true); toast(`Welcome, ${firstName(name)}. Add your team under Team.`);
+  });
+}
 function normalizeUser(u){
   u.credentials = (u.credentials||[]).map(c=> typeof c==="string" ? {name:c, number:"", expires:""} : c);
   if (u.active===undefined) u.active = true;
+  if (!GAS_LICENCES.includes(u.gasLicence)) u.gasLicence = "none";
+  if (typeof u.tssaCertNumber!=="string") u.tssaCertNumber = "";
+  if (typeof u.address!=="string") u.address = "";
 }
 async function loadJobSub(jobId){
   if (!S.jobSub[jobId]) S.jobSub[jobId] = emptySub();
@@ -676,12 +719,12 @@ async function loadJobSub(jobId){
   }catch(e){ console.error("loadJobSub", e); return false; }
 }
 /* merge=true uses update() (doc must exist). No fallback to set(): a failed update must never replace the whole document. */
-async function writeDoc(path, data, merge){
+async function writeDoc(path, data, merge, quiet){
   try{
     if (merge) await db.doc(path).update(data); else await db.doc(path).set(data);
     return true;
   }catch(e){
-    console.error("write failed", path, e); toast("Couldn't save — check your connection and try again.", "bad"); return false;
+    console.error("write failed", path, e); if (!quiet) toast("Couldn't save — check your connection and try again.", "bad"); return false;
   }
 }
 /* Settings: update only the changed fields. If the config doc doesn't exist yet, read it and set the merged object. */
@@ -707,15 +750,44 @@ function fileProblem(file){
   if (file.size > lim) return `“${file.name}” is too big (limit ${lim/1048576} MB).`;
   return null;
 }
-/* Returns {url, assetId} or null (and shows the error). Never stores blob: URLs; never inlines files over ~700 KB. */
+/* A URL from the file service: https:, or http(s) on this page's own origin. Relative URLs are resolved against this page. */
+function assetUrl(u){
+  try{
+    const x = new URL(String(u||""), location.href);
+    if (x.protocol==="https:" || (x.protocol==="http:" && x.origin===location.origin)) return x.href;
+  }catch(e){}
+  return "";
+}
+/* Photos are scaled down (longest side 1600 px) and saved as JPEG (quality 0.8) before inlining. null if the browser can't decode it. */
+async function shrinkImage(file){
+  if (!/^image\/(jpeg|png|webp|bmp)$/i.test(file.type||"")) return null;
+  const src = URL.createObjectURL(file);
+  try{
+    const img = await new Promise((res, rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = ()=>rej(new Error("decode failed")); i.src = src; });
+    const k = Math.min(1, 1600/Math.max(img.naturalWidth||1, img.naturalHeight||1));
+    const w = Math.max(1, Math.round(img.naturalWidth*k)), h = Math.max(1, Math.round(img.naturalHeight*k));
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h); ctx.drawImage(img, 0, 0, w, h);
+    return cv.toDataURL("image/jpeg", 0.8);
+  }catch(e){ console.error(e); return null; }
+  finally{ URL.revokeObjectURL(src); }
+}
+/* Returns {url, assetId} or null (and shows the error). Never stores blob: URLs.
+   Without the file service, the file is stored inline; in live mode only up to ~700 KB (after photo compression). */
 async function uploadFile(file){
   const bad = fileProblem(file); if (bad){ toast(bad, "bad"); return null; }
   let assetErr = null;
   if (assets){
-    try{ const up = await assets.upload(file); if (up && safeUrl(up.url, "media") && !/^blob:/i.test(up.url)) return {url:up.url, assetId:up.id||null}; throw new Error("upload returned no usable URL"); }
+    try{ const up = await assets.upload(file); const u = up && !/^blob:/i.test(String(up.url||"")) ? assetUrl(up.url) : ""; if (u) return {url:u, assetId:up.id||null}; throw new Error("upload returned no usable URL"); }
     catch(e){ console.error(e); assetErr = e; }
   }
-  if (file.size > MAX_INLINE){ toast(`Couldn't upload “${file.name}”.${assetErr?" The file service failed, and":""} Files over 700 KB can't be stored without the file service.`, "bad"); return null; }
+  const tooBig = n=> mode==="live" && n > MAX_INLINE;
+  const small = await shrinkImage(file);
+  if (small){
+    if (tooBig(Math.ceil(small.length*3/4))){ toast(`Couldn't upload “${file.name}”.${assetErr?" The file service failed, and":""} Even after shrinking, the photo is over 700 KB, which can't be stored without the file service.`, "bad"); return null; }
+    return {url:small, assetId:null};
+  }
+  if (tooBig(file.size)){ toast(`Couldn't upload “${file.name}”.${assetErr?" The file service failed, and":""} Files over 700 KB can't be stored without the file service.`, "bad"); return null; }
   try{
     const url = await new Promise((res, rej)=>{ const r = new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error||new Error("read failed")); r.readAsDataURL(file); });
     return {url, assetId:null};
@@ -767,9 +839,26 @@ const can = {
 function leakRelevant(j){ return j.jobType==="installation" || j.jobType==="replacement" || !!THEMES[j.requiredTrade]?.gas; }
 function isLate(j){ return ["assigned","en_route"].includes(j.status) && ts(j.scheduledAt) < Date.now()-30*60000; }
 function openHazards(filter){ return S.hazards.filter(h=>h.status!=="resolved" && (!filter || filter(h))); }
+const licOf = u=> GAS_LICENCES.includes(u?.gasLicence) ? u.gasLicence : "none";
+const hasLic = (u, min)=> !!u && LIC_RANK[licOf(u)] >= LIC_RANK[min];
+/* Open red tags on this job OR on the same equipment (also from an earlier visit). */
+function jobHazards(j){ return openHazards(h=>h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId)); }
+/* Red tag steps, each saved with a time and who recorded it. Immediate hazard: all 4. No immediate hazard: steps 3 and 4. */
+const HZ_STEPS = [
+  {k:"gasShutOffAt", by:"gasShutOffBy", rec:"gasShutOffRecordedAt", label:"Gas shut off to the appliance"},
+  {k:"customerInformedAt", by:"customerInformedBy", rec:"customerInformedRecordedAt", label:"Customer informed"},
+  {k:"distributorNotifiedAt", by:"distributorNotifiedRecordedBy", rec:"distributorNotifiedRecordedAt", label:"Gas utility told verbally (right away)"},
+  {k:"writtenNoticeSentAt", by:"writtenNoticeSentBy", rec:"writtenNoticeSentRecordedAt", label:"Written notice sent to the gas utility"},
+];
+const isImmediate = h=> h.hazardLevel==="immediate";
+const hazardSteps = h=> isImmediate(h) ? HZ_STEPS : HZ_STEPS.slice(2);
+const hazardAt = h=> h.createdAt || h.at;
+/* Immediate hazard: written notice due 14 days after the red tag. Older / non-immediate records keep their stored due date. */
+function noticeDue(h){ return h.writtenNoticeDueAt || (isImmediate(h) && hazardAt(h) ? new Date(ts(hazardAt(h))+14*DAY).toISOString() : h.writtenNoticeDue) || null; }
+function noticeOverdue(h){ const d = noticeDue(h); return !h.writtenNoticeSentAt && !!d && Date.now() > ts(d); }
 
 /* ------------------------------ SEEN / NEW BADGES ------------------------------ */
-const TRACKED = ["notes","media","materials","extractions"];
+const TRACKED = ["notes","media","materials"];
 const seenKey = (jobId, sec)=> "sr_seen_"+(S.userId||"x")+"_"+jobId+"_"+sec;
 function sectionUnseen(jobId, sec){
   const since = ts(lsGet(seenKey(jobId,sec)) || "1970-01-01T00:00:00Z");
@@ -811,15 +900,21 @@ function navCount(key){
   if (key==="schedule") return S.jobs.filter(j=>!isClosed(j) && !j.technicianId).length;
   if (key==="feedback" && S.role==="owner") return S.feedback.filter(f=>(f.status||"New")==="New").length;
   if (key==="dashboard" && isField()) return visibleJobs().filter(j=>!isClosed(j)).reduce((n,j)=>n+jobUnseen(j.id),0);
+  if (key==="dashboard" && ["owner","supervisor"].includes(S.role)) return S.hazards.filter(noticeOverdue).length;
   return 0;
 }
 /* "Viewing as" picks a specific person. The role always comes from that person's record. */
 const pickableUsers = ()=> activeUsers().filter(u=>ROLE_LABELS[u.role]).sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
-function userOptions(){
+/* compact: "Name · G2" (the role is the group heading) — fits the narrow side bar. Full: "Name — Role · G2". */
+function userLabel(u, compact){
+  const lic = licOf(u), tail = lic!=="none" ? " · "+lic : "";
+  return compact ? (u.name||"(no name)")+tail : `${u.name||"(no name)"} — ${ROLE_LABELS[u.role]||u.role}${tail}`;
+}
+function userOptions(compact){
   const list = pickableUsers();
   if (!list.length) return `<option value="">No active team members</option>`;
   return (S.userId && list.some(u=>u.id===S.userId) ? "" : `<option value="" selected disabled>Choose a person…</option>`)
-    + list.map(u=>`<option value="${esc(u.id)}" ${S.userId===u.id?"selected":""}>${esc(u.name||"(no name)")} — ${esc(ROLE_LABELS[u.role])}</option>`).join("");
+    + Object.keys(ROLE_LABELS).map(r=>{ const g = list.filter(u=>u.role===r); return g.length ? `<optgroup label="${esc(ROLE_LABELS[r])}">${g.map(u=>`<option value="${esc(u.id)}" ${S.userId===u.id?"selected":""}>${esc(userLabel(u, compact))}</option>`).join("")}</optgroup>` : ""; }).join("");
 }
 function setUser(userId, silent){
   const u = pickableUsers().find(x=>x.id===userId);
@@ -845,9 +940,15 @@ function openJob(id, tab){
   loadJobSub(id).then(()=>{
     if (S.view.jobId!==id) return;
     /* Don't wipe what the user has started typing: skip the main re-render while a field has unsaved text. */
-    if (hasDraft($("#main"))){ renderSide(); renderTabbar(); return; }
+    if (hasDraft($("#main"))){ renderSide(); renderTabbar(); showRefreshHint(); return; }
     render();
   });
+}
+function showRefreshHint(){
+  const m = $("#main"); if (!m || $("#newDataHint", m)) return;
+  const h = el(`<div class="callout" id="newDataHint" style="margin-bottom:12px;align-items:center">${icon("history","sm")}<div style="flex:1">New data loaded.</div><button class="btn sm" type="button">Refresh</button></div>`);
+  $("button", h).addEventListener("click", ()=>render());
+  m.prepend(h);
 }
 function hasDraft(root){
   return !!root && $$("input,textarea", root).some(f=>{
@@ -882,8 +983,8 @@ function renderSide(){
     <div class="navlist" role="list"></div>
     <div class="rolecard">
       <label for="roleSel">Viewing as (prototype)</label>
-      <select id="roleSel">${userOptions()}</select>
-      <div class="who">${avatar(u)}<div><div class="nm">${esc(u?.name||"No person chosen")}</div><div class="rl">${esc(ROLE_LABELS[S.role])}</div></div></div>
+      <select id="roleSel" title="${esc(u?userLabel(u):"")}">${userOptions(true)}</select>
+      <div class="who">${avatar(u)}<div style="min-width:0"><div class="nm">${esc(u?.name||"No person chosen")}</div><div class="rl">${esc(ROLE_LABELS[S.role])}${u&&licOf(u)!=="none"?" · "+esc(licOf(u))+" gas licence":""}</div></div></div>
     </div>`;
   const list = $(".navlist", side);
   navFor(S.role).forEach(([k,label,ic])=>{
@@ -893,10 +994,13 @@ function renderSide(){
   });
   $("#roleSel", side).addEventListener("change", e=>setUser(e.target.value));
 }
+function isDark(){
+  const pref = lsGet("sr_display") || S.config.theme || "system";
+  return pref==="dark" || (pref==="system" && !!window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+}
 function renderTop(){
   const top = $("#top"); const unread = unreadCount();
-  const pref = lsGet("sr_display") || S.config.theme || "system";
-  const dark = pref==="dark" || (pref==="system" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  const dark = isDark();
   top.innerHTML = `
     ${S.view.jobId||S.view.equipmentId||S.view.customerId ? `<button class="iconbtn" id="topBack" aria-label="Back">${icon("back")}</button>` : ""}
     <div class="crumb">${esc(pageTitle())}</div>
@@ -906,7 +1010,8 @@ function renderTop(){
     <button class="iconbtn" id="bellBtn" aria-label="Notifications">${icon("bell")}${unread?`<span class="dot">${unread}</span>`:""}</button>`;
   $("#openSearch").addEventListener("click", openPalette);
   $("#bellBtn").addEventListener("click", openNotifications);
-  $("#modeBtn").addEventListener("click", ()=>{ lsSet("sr_display", dark?"light":"dark"); render(); });
+  /* Only switch the theme attribute — no re-render, so anything typed on the page stays. */
+  $("#modeBtn").addEventListener("click", ()=>{ const d = isDark(); lsSet("sr_display", d?"light":"dark"); applyTheme(); $("#modeBtn").innerHTML = icon(d?"moon":"sun"); });
   $("#topBack")?.addEventListener("click", goBack);
 }
 function goBack(){
@@ -916,10 +1021,12 @@ function goBack(){
   render(); window.scrollTo(0,0);
 }
 function renderBanner(){
-  const b = $("#banner");
-  if (mode==="preview"){ b.hidden=false; b.innerHTML = `${icon("eye","sm")}<span><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span>`; }
-  else if (S.loadErrors.length){ b.hidden=false; b.innerHTML = `${icon("alert","sm")}<span><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span>`; }
-  else b.hidden = true;
+  const b = $("#banner"); const rows = [];
+  if (!RULES_APPROVED) rows.push(`${icon("alert","sm")}<span><b>${esc(RULES_WARNING)}</b></span>`);
+  if (mode==="preview") rows.push(`${icon("eye","sm")}<span><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span>`);
+  else if (S.loadErrors.length) rows.push(`${icon("alert","sm")}<span><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span>`);
+  b.hidden = !rows.length;
+  b.innerHTML = rows.map(r=>`<div class="bl">${r}</div>`).join("");
 }
 function renderTabbar(){
   const bar = $("#tabbar"); bar.innerHTML = "";
@@ -937,7 +1044,7 @@ function openMoreSheet(rest){
   const body = el(`<div><div class="mh"><h3>More</h3><button class="btn ghost sm" data-close>${icon("x")}</button></div>
     <div class="stack tight" id="moreList"></div>
     <hr class="sep">
-    <div class="field"><label>Viewing as (prototype)</label><select id="roleSel2">${userOptions()}</select></div>
+    <div class="field"><label>Viewing as (prototype)</label><select id="roleSel2">${userOptions(false)}</select></div>
   </div>`);
   const list = $("#moreList", body);
   if (!rest.length) list.appendChild(el(`<div class="hint">Everything for this role is in the bar below.</div>`));
@@ -976,11 +1083,29 @@ function showModal(node, opts){
   ov._isDirty = ()=> dirty;
   ov.addEventListener("click", e=>{ if (e.target===ov) requestClose(); });
   $$("[data-close]", node).forEach(b=>b.addEventListener("click", closeOverlay));
-  $("#overlays").innerHTML = ""; $("#overlays").appendChild(ov);
+  clearOverlays(); $("#overlays").appendChild(ov);
   setTimeout(()=>{ const f = node.querySelector("input:not([type=checkbox]):not([type=file]),select,textarea"); if (f && !opts.noFocus) f.focus(); }, 30);
   return ov;
 }
-function closeOverlay(){ $("#overlays").innerHTML = ""; }
+/* Before removing layers, cancel any open confirm/prompt box so its promise resolves (otherwise busy locks never clear). */
+function clearOverlays(){
+  const box = $("#overlays");
+  Array.from(box.children).forEach(c=>{ if (c._cancel){ try{ c._cancel(); }catch(e){ console.error(e); } } });
+  box.innerHTML = "";
+}
+function closeOverlay(){ clearOverlays(); }
+/* Top layer for focus: the last overlay, or the first-start setup screen. */
+function topLayer(){ const l = $("#overlays").children; return l[l.length-1] || $("#setup") || null; }
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function trapFocus(e){
+  const top = topLayer(); if (!top) return;
+  const f = $$(FOCUSABLE, top).filter(x=>x.getClientRects().length);
+  if (!f.length){ e.preventDefault(); return; }
+  const first = f[0], last = f[f.length-1], a = document.activeElement;
+  if (!top.contains(a)){ e.preventDefault(); (e.shiftKey?last:first).focus(); }
+  else if (e.shiftKey && a===first){ e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && a===last){ e.preventDefault(); first.focus(); }
+}
 /* Esc / backdrop: close the top layer; ask first if a form in it was changed. */
 async function requestClose(){
   const layers = $("#overlays").children; const top = layers[layers.length-1];
@@ -991,7 +1116,8 @@ async function requestClose(){
 }
 document.addEventListener("keydown", e=>{
   if (e.key==="Escape") requestClose();
-  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="k"){ e.preventDefault(); openPalette(); }
+  if (e.key==="Tab") trapFocus(e);
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="k"){ e.preventDefault(); if (!topLayer()) openPalette(); }
 });
 function modalHead(title, sub){ return `<div class="mh"><div><h3>${esc(title)}</h3>${sub?`<div class="hint">${esc(sub)}</div>`:""}</div><button class="btn ghost sm" type="button" data-close aria-label="Close">${icon("x")}</button></div>`; }
 /* Stacks on top of any open modal, and removes only itself — the form underneath stays filled in. */
@@ -1007,6 +1133,23 @@ function confirmBox(title, msg, okLabel, danger){
     $("[data-no]", b).addEventListener("click", ()=>finish(false));
     $("[data-yes]", b).addEventListener("click", ()=>finish(true));
     $("#overlays").appendChild(ov);
+    setTimeout(()=>$("[data-no]", b)?.focus(), 20);
+  });
+}
+/* Like confirmBox, but asks for a reason. Resolves to the trimmed text, or null if cancelled. */
+function promptBox(title, msg, okLabel){
+  return new Promise(res=>{
+    const b = el(`<form>${modalHead(title)}<p>${esc(msg)}</p><div class="field mt"><label>Reason *</label><textarea name="r"></textarea></div><div class="mf"><button type="button" class="btn" data-no>Cancel</button><button class="btn primary">${esc(okLabel||"OK")}</button></div></form>`);
+    const ov = el(`<div class="overlay" role="dialog" aria-modal="true"></div>`); const box = el(`<div class="modal"></div>`);
+    box.appendChild(b); ov.appendChild(box);
+    let done = false; const finish = v=>{ if (done) return; done = true; ov.remove(); res(v); };
+    ov._cancel = ()=>finish(null);
+    ov.addEventListener("click", e=>{ if (e.target===ov) finish(null); });
+    $$("[data-close]", b).forEach(x=>x.addEventListener("click", ()=>finish(null)));
+    $("[data-no]", b).addEventListener("click", ()=>finish(null));
+    b.addEventListener("submit", e=>{ e.preventDefault(); const v = b.r.value.trim(); if (!v){ toast("Give a reason.","bad"); return; } finish(v); });
+    $("#overlays").appendChild(ov);
+    setTimeout(()=>b.r.focus(), 20);
   });
 }
 function openLightbox(m){
@@ -1015,7 +1158,7 @@ function openLightbox(m){
   const ov = el(`<div class="overlay"><div class="lightbox stack">${!src?`<div class="card">${emptyState("image","This file can't be shown.")}</div>`:isVid?`<video src="${esc(src)}" controls autoplay></video>`:`<img src="${esc(src)}" alt="${esc(m.category||"photo")}">`}
     <div class="row between" style="color:#fff"><span>${esc(m.category||"Photo")}${m.caption?" — "+esc(m.caption):""}</span><span class="small">${esc(m.by||"")} · ${esc(fmtDate(m.at))}</span></div></div></div>`);
   ov.addEventListener("click", closeOverlay);
-  $("#overlays").innerHTML=""; $("#overlays").appendChild(ov);
+  clearOverlays(); $("#overlays").appendChild(ov);
 }
 
 /* Notifications drawer */
@@ -1033,13 +1176,16 @@ function openNotifications(){
   ov.appendChild(d); ov.addEventListener("click", e=>{ if (e.target===ov) closeOverlay(); });
   $$("[data-close]", d).forEach(b=>b.addEventListener("click", closeOverlay));
   $("#markAll", d).addEventListener("click", ()=>{ markRead(list.filter(n=>!isRead(n))); closeOverlay(); render(); });
-  $("#overlays").innerHTML=""; $("#overlays").appendChild(ov);
+  clearOverlays(); $("#overlays").appendChild(ov);
 }
+/* One combined error message, not one per failed notification. */
 async function markRead(items){
+  let failed = 0;
   await Promise.all(items.filter(n=>!isRead(n)).map(async n=>{
     const readBy = (n.readBy||[]).concat(S.userId||"anon");
-    if (await writeDoc("notifications/"+n.id, {readBy}, true)) n.readBy = readBy;
+    if (await writeDoc("notifications/"+n.id, {readBy}, true, true)) n.readBy = readBy; else failed++;
   }));
+  if (failed) toast(failed===1 ? "Couldn't mark a notification as read. Check your connection." : `Couldn't mark ${failed} notifications as read. Check your connection.`, "bad");
   renderTop();
 }
 
@@ -1049,7 +1195,7 @@ function openPalette(){
     <div class="pin">${icon("search")}<input id="palIn" placeholder="Search jobs, customers, equipment, screens…" autocomplete="off"><kbd class="tiny faint">Esc</kbd></div>
     <div class="res" id="palRes"></div></div></div>`);
   ov.addEventListener("click", e=>{ if (e.target===ov) closeOverlay(); });
-  $("#overlays").innerHTML=""; $("#overlays").appendChild(ov);
+  clearOverlays(); $("#overlays").appendChild(ov);
   const input = $("#palIn"), res = $("#palRes"); let items = [], sel = 0;
   function draw(){
     const q = input.value.trim().toLowerCase(); items = [];
@@ -1209,6 +1355,12 @@ function dashSupervisor(){
   const help = S.jobs.flatMap(j=>sub(j.id).help.filter(h=>h.status!=="resolved").map(h=>Object.assign({job:j},h)));
   const onsite = S.jobs.filter(j=>["en_route","arrived","working"].includes(j.status));
   wrap.appendChild(el(`<div class="grid g4">${kpi("Awaiting review", review.length, "checkcircle","",review.length>0)}${kpi("Open help requests", help.length, "lifebuoy","",help.length>0)}${kpi("Crew active now", onsite.length, "users")}${kpi("Open red tags", openHazards().length, "tag","",openHazards().length>0)}</div>`));
+  const od = S.hazards.filter(noticeOverdue);
+  if (od.length){
+    const a = el(`<div class="stack mt">${od.map(h=>`<div class="callout bad" data-hz="${esc(h.id)}" style="cursor:pointer">${icon("tag")}<div><b>Overdue — written notice to the gas utility.</b> ${esc(equipmentLabel(equipmentById(h.equipmentId)))} at ${esc(customerById(h.customerId)?.name||"site")} · was due ${esc(fmtDateOnly(noticeDue(h)))}</div></div>`).join("")}</div>`);
+    $$("[data-hz]", a).forEach(n=>n.addEventListener("click", ()=>{ const h = S.hazards.find(x=>x.id===n.dataset.hz); if (!h) return; if (h.jobId && jobById(h.jobId)) openJob(h.jobId, "safety"); else if (h.equipmentId) openEquipment(h.equipmentId); }));
+    wrap.appendChild(a);
+  }
   const g = el(`<div class="grid g-main mt2"><div><h3 style="margin-bottom:10px">Ready for your review</h3><div id="rv"></div></div><div><h3 style="margin-bottom:10px">Help requests</h3><div id="hp"></div></div></div>`);
   $("#rv", g).appendChild(jobGrid(review, "Nothing waiting for review."));
   const hp = $("#hp", g);
@@ -1248,11 +1400,18 @@ function dashOwner(){
 }
 function ownerAlerts(){
   const out = [];
-  openHazards().forEach(h=>{
-    const due = h.writtenNoticeDue ? Math.ceil((ts(h.writtenNoticeDue)-Date.now())/DAY) : null;
-    out.push({c:"bad", ic:"tag", t:`Red tag: ${equipmentLabel(equipmentById(h.equipmentId))} at ${customerById(h.customerId)?.name||"site"}`,
-      s: (h.hazardLevel==="immediate"?"Immediate hazard. ":"")+(due!==null?(due<0?`Written notice to the gas distributor is ${-due} day(s) overdue.`:`Written notice to the gas distributor due in ${due} day(s).`):"Record when the distributor was notified."),
-      go:()=>h.jobId?openJob(h.jobId,"safety"):openEquipment(h.equipmentId)});
+  /* Open red tags, plus removed ones whose written notice is still overdue. */
+  S.hazards.filter(h=>h.status!=="resolved" || noticeOverdue(h)).forEach(h=>{
+    const due = noticeDue(h); const d = due ? Math.ceil((ts(due)-Date.now())/DAY) : null;
+    const missing = h.status!=="resolved" && isImmediate(h) ? HZ_STEPS.slice(0,3).filter(st=>!h[st.k]).length : 0;
+    const parts = [];
+    if (isImmediate(h)) parts.push("Immediate hazard.");
+    if (missing) parts.push(`${missing} of steps 1–3 not recorded.`);
+    if (noticeOverdue(h)) parts.push(`Overdue — written notice to the gas utility was due ${fmtDateOnly(due)}.`);
+    else if (!h.writtenNoticeSentAt && d!==null) parts.push(`Written notice to the gas utility due in ${d} day(s).`);
+    else if (!h.writtenNoticeSentAt) parts.push("Record when the gas utility was told.");
+    out.push({c:"bad", ic:"tag", t:`${h.status==="resolved"?"Removed red tag":"Red tag"}: ${equipmentLabel(equipmentById(h.equipmentId))} at ${customerById(h.customerId)?.name||"site"}`,
+      s:parts.join(" "), go:()=> h.jobId && jobById(h.jobId) ? openJob(h.jobId,"safety") : h.equipmentId ? openEquipment(h.equipmentId) : null});
   });
   activeUsers().forEach(u=> (u.credentials||[]).forEach(c=>{
     if (!c.expires) return; const d = Math.ceil((ts(c.expires)-Date.now())/DAY);
@@ -1314,7 +1473,7 @@ function renderReview(){
     const c = el(`<div class="card"><div class="row between wrap top"><div><div class="row"><span class="mono" style="font-weight:600">${esc(j.refNumber)}</span>${prioPill(j.priority)}</div>
       <div style="font-weight:750;font-size:16px;margin-top:3px">${esc(customerById(j.customerId)?.name||"")}</div><div class="hint">${esc(j.siteAddress)} · ${esc(cap(j.jobType))} · ${esc(userById(j.technicianId)?.name||"")}</div></div>
       <div class="ring" style="--p:${Math.round(done/items.length*100)}"><span>${done}/${items.length}</span></div></div>
-      <div class="row wrap small dim mt">${icon("pencil","sm")} ${s.notes.length} note(s) · ${icon("image","sm")} ${s.media.length} photo(s) · ${icon("gauge","sm")} ${Object.keys(j.readings||{}).length + s.extractions.length} reading(s) · ${icon("receipt","sm")} ${s.materials.length} expense(s)</div>
+      <div class="row wrap small dim mt">${icon("pencil","sm")} ${s.notes.length} note(s) · ${icon("image","sm")} ${s.media.length} photo(s) · ${icon("gauge","sm")} ${Object.keys(j.readings||{}).filter(k=>k!=="savedBy"&&k!=="savedAt").length} reading(s) · ${icon("receipt","sm")} ${s.materials.length} expense(s)</div>
       <div class="actionbar mt"><button class="btn" data-open>${icon("eye","sm")} Open job</button><button class="btn go" data-ok>${icon("check","sm")} Approve &amp; close</button><button class="btn danger" data-back>${icon("undo","sm")} Send back</button></div></div>`);
     $("[data-open]", c).addEventListener("click", ()=>openJob(j.id, "completion"));
     { const ok = $("[data-ok]", c); ok.addEventListener("click", withBusy(ok, ()=>approveJob(j))); }
@@ -1415,7 +1574,7 @@ function renderJob(id){
   if (bar.children.length) wrap.appendChild(bar);
 
   const leakOn = !!S.config.modules.leakTest;
-  const tabs = [["overview","Overview","home"],["readings","Readings","gauge","extractions"],["notes","Notes","pencil","notes"],["media","Photos","image","media"]]
+  const tabs = [["overview","Overview","home"],["readings","Readings","gauge"],["notes","Notes","pencil","notes"],["media","Photos","image","media"]]
     .concat(leakOn?[["leak","Leak test","droplet"]]:[])
     .concat([["materials","Materials","receipt","materials"],["safety","Safety","tag"],["completion","Checklist","clipboard"],["timeline","Timeline","history"]]);
   if (!tabs.some(t=>t[0]===S.view.jobTab)) S.view.jobTab = "overview";
@@ -1475,7 +1634,9 @@ async function freshJob(j, allowed){
   try{ snap = await db.doc("jobs/"+j.id).get(); }
   catch(e){ console.error(e); toast("Couldn't check the latest version of this job. Try again.", "bad"); return null; }
   if (!snap || !snap.exists){ toast("This job no longer exists.", "bad"); return null; }
-  Object.assign(j, snap.data());
+  const data = snap.data() || {};
+  Object.keys(j).forEach(k=>{ if (k!=="id") delete j[k]; });
+  Object.assign(j, data);
   if (allowed && !allowed.includes(j.status)){
     toast(`${j.refNumber} was changed on another device (now ${STATUS[j.status]?.label||j.status}). The screen has been refreshed — nothing was saved.`, "bad");
     render(); return null;
@@ -1491,11 +1652,9 @@ async function advanceJob(j){
     const idx = STATUSES.indexOf(j.status); const next = STATUSES[idx+1];
     if (!next || next==="completed") return;
     if (next==="completion_review"){
-      const items = completionItems(j);
-      const missing = items.filter(i=>!i.ok && !i.noBlock);
+      if (!(await freshHazards())) return;
+      const missing = completionItems(j).filter(i=>!i.ok);
       if (missing.length){ toast("Before submitting, add: "+missing.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return; }
-      const flagged = items.filter(i=>!i.ok && i.noBlock);
-      if (flagged.length) toast("Note: "+flagged.map(m=>m.label).join(", ")+".", "bad");
     }
     const patch = {status:next}; if (next==="completion_review") patch.submittedAt = now();
     if (next==="arrived") patch.arrivedAt = now();
@@ -1511,13 +1670,27 @@ async function advanceJob(j){
 async function approveJob(j){
   return once("status:"+j.id, async ()=>{
     if (!(await freshJob(j, ["completion_review"]))) return;
+    /* Approving your own job needs a G2 or G1. */
+    const selfApproved = !!j.technicianId && j.technicianId===S.userId;
+    if (selfApproved && !hasLic(me(), "G2")){ toast("A G3 cannot approve their own job. Another supervisor (G2 or higher) must approve.", "bad"); return; }
+    if (!(await freshHazards())) return;
+    const hardStop = ()=>{ const hard = completionItems(j).filter(i=>!i.ok && i.safety); if (hard.length){ toast("Can't close — safety items can't be skipped: "+hard.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); } return hard.length>0; };
+    if (hardStop()) return;
     const missing = completionItems(j).filter(i=>!i.ok);
-    if (missing.length && !(await confirmBox("Close with items missing?", "Still missing: "+missing.map(m=>m.label).join(", ")+". Close anyway?", "Close anyway"))) return;
+    let reason = null;
+    if (missing.length){
+      reason = await promptBox("Close with items missing?", "Still missing: "+missing.map(m=>m.label).join(", ")+". Say why you are closing anyway. The reason is saved in the timeline.", "Close anyway");
+      if (!reason) return;
+    }
     if (!(await freshJob(j, ["completion_review"]))) return;
-    const patch = {status:"completed", closedAt:now(), review:{decision:"approved", by:me()?.name||"Supervisor", at:now()}};
+    if (!(await freshHazards()) || hardStop()) return;
+    const review = {decision:"approved", by:me()?.name||"Supervisor", at:now()};
+    if (selfApproved) review.selfApproved = true;
+    if (reason){ review.overrideReason = reason; review.overrideItems = missing.map(m=>m.label); }
+    const patch = {status:"completed", closedAt:now(), review};
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
     Object.assign(j, patch);
-    await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"});
+    await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"+(selfApproved?" · self-approved":"")+(reason?` · closed with items missing (${review.overrideItems.join(", ")}). Reason: ${reason}`:"")});
     if (j.technicianId) await notify(`${patch.review.by} approved ${j.refNumber}. It's closed and in the archive.`, {toUser:j.technicianId, jobId:j.id});
     toast(`${j.refNumber} closed and moved to the Archive.`); render();
   });
@@ -1561,7 +1734,7 @@ function techWarnings(techId, whenIso, trade, excludeId){
   const clash = S.jobs.find(x=>x.id!==excludeId && x.technicianId===techId && !isClosed(x) && Math.abs(ts(x.scheduledAt)-t) < 90*60000);
   if (clash) out.push(`${u.name} already has ${clash.refNumber} within 90 minutes of this time.`);
   if (trade && u.trade && u.trade!==trade) out.push(`${u.name}'s trade is ${THEMES[u.trade]?.label||u.trade}, not ${THEMES[trade]?.label||trade}. Confirm they hold the right licence.`);
-  if (THEMES[trade]?.gas && !(u.credentials||[]).some(c=>/G1|G2|G3|gas/i.test(c.name))) out.push(`${u.name} has no gas licence on file (G3/G2/G1).`);
+  if (THEMES[trade]?.gas && licOf(u)==="none" && !(u.credentials||[]).some(c=>/G1|G2|G3|gas/i.test(c.name))) out.push(`${u.name} has no gas licence on file (G3/G2/G1).`);
   (u.credentials||[]).forEach(c=>{ if (c.expires && ts(c.expires) < t) out.push(`${u.name}'s ${c.name} expires before this job (${fmtDateOnly(c.expires)}).`); });
   if (u.role==="apprentice") out.push(`${u.name} is an apprentice — make sure a supervisor is available.`);
   return out;
@@ -1569,7 +1742,7 @@ function techWarnings(techId, whenIso, trade, excludeId){
 function openJobForm(j){
   const editing = !!j;
   const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
-  const techOpts = `<option value="">Unassigned</option>`+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(u.name)} — ${esc(ROLE_LABELS[u.role])}</option>`).join("");
+  const techOpts = `<option value="">Unassigned</option>`+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
       <div class="field"><label>Customer *</label><select name="customerId" required><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select></div>
@@ -1663,22 +1836,31 @@ function jobReadings(j, s){
   const def = readingDef(j); const r = j.readings||{};
   const inReview = !EDITABLE_READING_STATUSES.includes(j.status);
   const editable = can.fieldWork(j) && !inReview;
+  /* While an open immediate-hazard red tag is on this job/equipment, "left in safe operating condition" can't be ticked. */
+  const imm = jobHazards(j).filter(isImmediate);
+  const tagged = k=> k==="leftSafe" && imm.length>0;
+  const checkRow = ([k,label,req])=> tagged(k)
+    ? `<div class="check" style="align-items:center"><span class="pill bad">${icon("tag","sm")} Appliance is red-tagged — gas shut off</span>${imm.every(h=>h.gasShutOffAt)?"":`<span class="hint">Record the gas shut-off time on the red tag (Safety tab).</span>`}</div>`
+    : `<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`;
   const form = el(`<form class="card"><div class="card-h"><div><h3>${esc(THEMES[j.requiredTrade]?.label||"")} readings</h3><div class="hint">Type what your instruments show. Leave blank what you didn't measure — nothing is filled in for you.</div></div></div>
     ${inReview && !isClosed(j)?`<div class="callout mt" style="margin-bottom:12px">${icon("lock","sm")}<div>Readings are locked while the job is in review. A supervisor can send it back if something needs changing.</div></div>`:""}
     <div class="readgrid">${def.fields.map(([k,label,unit])=>`<div class="field"><label>${esc(label)}</label><div class="unitwrap"><input class="mono" name="${k}" inputmode="decimal" value="${esc(r[k]??"")}" ${editable?"":"disabled"}><span>${esc(unit)}</span></div></div>`).join("")}</div>
     ${def.refrigerant?`<div class="field mt"><label>Refrigerant type</label><input name="refrigerant" value="${esc(r.refrigerant||equipmentById(j.equipmentId)?.refrigerant||"")}" placeholder="e.g. R-410A, R-454B" ${editable?"":"disabled"}></div>`:""}
     <h4 class="mt2" style="margin-bottom:8px">Safety checks</h4>
-    <div class="stack tight">${def.checks.map(([k,label,req])=>`<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`).join("")}</div>
+    <div class="stack tight">${def.checks.map(checkRow).join("")}</div>
     ${editable?`<div class="mf"><button class="btn primary">${icon("check","sm")} Save readings</button></div>`:""}
     ${r.savedBy?`<div class="hint mt">Last saved by ${esc(r.savedBy)} · ${esc(ago(r.savedAt))}</div>`:""}</form>`);
   onSubmit(form, async ()=>{
     const out = {};
     def.fields.forEach(([k])=>{ const v = form[k].value.trim(); if (v!=="") out[k]=v; });
-    def.checks.forEach(([k])=>{ if (form[k].checked) out[k]=true; });
+    def.checks.forEach(([k])=>{ if (form[k] && form[k].checked) out[k]=true; });
     if (form.refrigerant && form.refrigerant.value.trim()) out.refrigerant = form.refrigerant.value.trim();
+    /* The refrigerant type can be pre-filled from the equipment, so it alone doesn't count as a reading. */
+    if (!def.fields.some(([k])=>out[k]!==undefined) && !def.checks.some(([k])=>out[k])){ toast("Enter at least one reading.","bad"); return; }
     const bad = def.fields.filter(([k])=> out[k]!==undefined && parseNum(out[k], NEG_OK_READINGS.has(k))===null);
     if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
+    if (jobHazards(j).some(isImmediate)) delete out.leftSafe;
     if (j.requiredTrade==="hvac" && Number(out.coAirFree)>=400) toast("Flue CO is very high. Check the appliance and consider a red tag before leaving.","bad");
     out.savedBy = me()?.name||""; out.savedAt = now();
     if (!(await writeDoc("jobs/"+j.id, {readings:out}, true))) return;
@@ -1687,56 +1869,7 @@ function jobReadings(j, s){
     toast("Readings saved."); renderMain();
   });
   wrap.appendChild(form);
-
-  const cam = el(`<div class="card"><div class="card-h"><div><h3>${icon("sparkle","sm")} Read a gauge from a photo</h3><div class="hint">Photograph a gauge, meter or nameplate. The assistant suggests a value; you confirm or correct it and say what it means before it's saved. (Simulated in this prototype.)</div></div></div>
-    ${editable?`<label class="btn primary" style="width:fit-content">${icon("camera","sm")} Take or upload photo<input type="file" accept="image/*" capture="environment" hidden></label>`:""}
-    <div id="xz" class="mt"></div>
-    <h4 class="mt2" style="margin-bottom:8px">Confirmed from photos</h4><div id="xl"></div></div>`);
-  $("input[type=file]", cam)?.addEventListener("change", ev=>{ const file = ev.target.files[0]; ev.target.value = ""; if (file) runExtraction(j, file, $("#xz", cam)); });
-  const conf = s.extractions.filter(x=>x.confirmed);
-  $("#xl", cam).innerHTML = conf.length ? `<div class="tablewrap"><table><thead><tr><th>Value</th><th>Meaning</th><th>AI confidence</th><th>By</th><th>When</th></tr></thead><tbody>${conf.map(x=>`<tr><td class="mono">${esc(x.finalValue)} ${esc(x.unit)}${x.corrected?` <span class="pill nodot warn">corrected</span>`:""}</td><td>${esc(x.context)}</td><td>${Math.round((x.confidence||0)*100)}%</td><td>${esc(x.confirmedBy)}</td><td>${esc(ago(x.at))}</td></tr>`).join("")}</tbody></table></div>` : `<div class="hint">None yet.</div>`;
-  wrap.appendChild(cam);
   return wrap;
-}
-function runExtraction(j, file, zone){
-  const problem = fileProblem(file); if (problem || !/^image\//i.test(file.type||"")){ toast(problem || "Choose a photo.", "bad"); return; }
-  const clearZone = ()=>{ revokeLocalBlob(zone._blob); zone._blob = null; zone.innerHTML = ""; };
-  clearZone();
-  const url = localBlobUrl(file); zone._blob = url;
-  zone.innerHTML = `<div class="row"><img src="${esc(url)}" style="width:90px;height:68px;object-fit:cover;border-radius:10px"><span class="hint">Reading the image…</span></div>`;
-  setTimeout(()=>{
-    if (zone._blob!==url) return; /* replaced by a newer photo */
-    const units = THEMES[j.requiredTrade]?.units || ["units"]; const unit = units[0];
-    const value = unit==="in.wc" ? (3+Math.random()*4).toFixed(1) : unit==="psig" ? (100+Math.random()*200).toFixed(0) : unit==="V" ? (115+Math.random()*130).toFixed(1) : (Math.random()*60+10).toFixed(1);
-    const confidence = 0.6 + Math.random()*0.35;
-    zone.innerHTML = "";
-    const c = el(`<div class="callout" style="display:block"><div class="row top" style="gap:12px"><img src="${esc(url)}" style="width:110px;height:82px;object-fit:cover;border-radius:10px;flex:none">
-      <div class="stack" style="flex:1"><div class="row wrap"><b>Suggested:</b><input class="in mono" id="v" value="${value}" style="width:96px"><input class="in" id="u" value="${esc(unit)}" style="width:80px"></div>
-      <div class="confbar"><div style="width:${Math.round(confidence*100)}%"></div></div><div class="hint">Confidence ${Math.round(confidence*100)}%. Check it against the photo.</div></div></div>
-      <div class="field mt"><label>What does this reading mean? *</label><select id="ctx" class="in"><option value="">Choose…</option>${CONTEXT_OPTIONS.map(o=>`<option>${o}</option>`).join("")}</select></div>
-      <div class="mf"><button class="btn" id="rt">Retake</button><button class="btn primary" id="ok">${icon("check","sm")} Confirm and save</button></div></div>`);
-    zone.appendChild(c);
-    const okBtn = $("#ok", c), rtBtn = $("#rt", c);
-    rtBtn.addEventListener("click", clearZone);
-    okBtn.addEventListener("click", withBusy([okBtn, rtBtn], async ()=>{
-      const ctx = $("#ctx", c).value; if (!ctx){ toast("Choose what the reading means first.","bad"); return; }
-      const finalValue = $("#v", c).value.trim(), unitIn = $("#u", c).value.trim();
-      if (parseNum(finalValue, /psig|°F|°C/i.test(unitIn))===null){ toast("The value must be a plain number, e.g. 3.5.","bad"); return; }
-      if (!unitIn){ toast("Enter the unit.","bad"); return; }
-      if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
-      const up = await uploadFile(file); if (!up) return;
-      const rec = {rawValue:value, finalValue, unit:unitIn, confidence, context:ctx, confirmed:true, corrected:finalValue!==value,
-        confirmedBy:me()?.name||"", byId:S.userId, at:now(), sourceMediaUrl:up.url};
-      const id = await addDoc("jobs/"+j.id+"/extractions", rec); if (!id) return;
-      sub(j.id).extractions.unshift(Object.assign({id}, rec));
-      const m = {url:up.url, assetId:up.assetId, category:"Gauge photo", caption:`${rec.finalValue} ${rec.unit} · ${ctx}`, contentType:file.type, at:now(), by:me()?.name||"", byId:S.userId};
-      const mid = await addDoc("jobs/"+j.id+"/media", m, "The reading was saved, but its photo couldn't be added to Photos.");
-      if (mid) sub(j.id).media.unshift(Object.assign({id:mid}, m));
-      clearZone();
-      if (mid) toast("Reading confirmed and linked to its photo.");
-      renderMain();
-    }));
-  }, 900);
 }
 
 /* ---- notes (with dictation) ---- */
@@ -1853,7 +1986,7 @@ function leakPatch(j, next){
 function jobLeak(j){
   const editable = can.fieldWork(j); const lt = j.leakTest||{status:"not_set"};
   const hist = Array.isArray(j.leakHistory) ? j.leakHistory : [];
-  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. Either way the job can move on.</div></div></div>${leakChip(j)}<div class="actionbar mt" id="a"></div>
+  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. A Fail or Inconclusive result stops the job from closing until a passing re-test is recorded or the appliance is red-tagged.</div></div></div>${leakChip(j)}<div class="actionbar mt" id="a"></div>
     ${hist.length?`<h4 class="mt2" style="margin-bottom:6px">Earlier results</h4><div class="stack tight">${hist.slice().reverse().map(h=>`<div class="note"><div class="meta">${esc(h.by||"")} · ${esc(fmtDate(h.at))} · replaced ${esc(fmtDate(h.replacedAt))}${h.replacedBy?" by "+esc(h.replacedBy):""}</div>${esc(leakSummary(h))}${h.method?" · "+esc(h.method):""}${h.notes?" — "+esc(h.notes):""}</div>`).join("")}</div>`:""}</div>`);
   const a = $("#a", wrap);
   if (editable && lt.status==="not_set"){
@@ -1913,6 +2046,36 @@ function leakSkip(j){
 }
 
 /* ---- materials ---- */
+/* Receipts open inside the app: photos in the lightbox, PDFs as a short-lived blob: URL. No data: links. */
+function receiptKind(u){
+  const s = String(u??"").trim();
+  if (/^data:/i.test(s)) return /^data:image\//i.test(s) && safeUrl(s, "img") ? "img" : /^data:application\/pdf[;,]/i.test(s) ? "pdf" : null;
+  return safeUrl(s, "href") ? "link" : null;
+}
+function dataUrlToBlob(u){
+  const m = /^data:([^;,]*)((?:;[^;,]*)*?)(;base64)?,(.*)$/is.exec(String(u||""));
+  if (!m) return null;
+  try{
+    const raw = m[3] ? atob(m[4]) : decodeURIComponent(m[4]);
+    const a = new Uint8Array(raw.length); for (let i=0; i<raw.length; i++) a[i] = raw.charCodeAt(i) & 255;
+    return new Blob([a], {type:m[1]||"application/octet-stream"});
+  }catch(e){ console.error(e); return null; }
+}
+function openReceipt(m){
+  const u = m.receiptUrl, k = receiptKind(u);
+  const lb = ()=>openLightbox({url:u, category:"Receipt", caption:m.description, by:m.by, at:m.at, contentType:"image/*"});
+  if (k==="img" || (k==="link" && /^image\//i.test(m.receiptType||""))) return lb();
+  if (k==="pdf"){
+    const blob = dataUrlToBlob(u); if (!blob){ toast("This receipt can't be opened.","bad"); return; }
+    const b = URL.createObjectURL(blob);
+    const w = window.open(b, "_blank");
+    setTimeout(()=>URL.revokeObjectURL(b), 60000);
+    if (!w) toast("The browser blocked the new tab. Allow pop-ups to view the PDF.","bad");
+    return;
+  }
+  if (k==="link"){ window.open(safeUrl(u, "href"), "_blank", "noopener,noreferrer"); return; }
+  toast("This receipt can't be opened here.","bad");
+}
 const lineTotal = m=> Number(m.qty ?? 1)*Number(m.unitCost||0);
 function expensePill(s){ const map = {approved:["ok","Approved"], rejected:["bad","Rejected"], clarify:["warn","Question"], pending:["slate","Pending"]}; const k = s||"pending"; const m = Object.hasOwn(map, k) ? map[k] : ["slate", String(k)]; return `<span class="pill ${esc(m[0])}">${esc(m[1])}</span>`; }
 function jobMaterials(j, s){
@@ -1924,7 +2087,8 @@ function jobMaterials(j, s){
   const t = $("#t", wrap);
   if (!s.materials.length){ t.innerHTML = `<div class="hint">Nothing logged yet.</div>`; return wrap; }
   s.materials.forEach(m=>{
-    const r = el(`<div class="note" style="margin-bottom:8px"><div class="row between wrap"><div><b>${esc(m.description)}</b><div class="hint">${esc(m.qty)} × ${money(m.unitCost)} · ${esc(m.source||"")}${m.receiptUrl?(safeUrl(m.receiptUrl,"href")?` · <a href="${esc(safeUrl(m.receiptUrl,"href"))}" target="_blank" rel="noopener noreferrer">receipt</a>`:` · receipt stored (can't be opened here)`):""}</div></div><div class="row"><b class="mono">${money(lineTotal(m))}</b>${expensePill(m.status)}</div></div></div>`);
+    const r = el(`<div class="note" style="margin-bottom:8px"><div class="row between wrap"><div><b>${esc(m.description)}</b><div class="hint">${esc(m.qty)} × ${money(m.unitCost)} · ${esc(m.source||"")}${m.receiptUrl?(receiptKind(m.receiptUrl)?` · <button type="button" class="btn ghost sm" data-rc>${icon("receipt","sm")} View receipt</button>`:` · receipt stored (can't be opened here)`):""}</div></div><div class="row"><b class="mono">${money(lineTotal(m))}</b>${expensePill(m.status)}</div></div></div>`);
+    $("[data-rc]", r)?.addEventListener("click", ()=>openReceipt(m));
     if (m.status==="clarify"){
       r.appendChild(el(`<div class="callout warn" style="margin-top:8px">${icon("message","sm")}<div><b>${esc(m.decidedBy||"Accounting")} asks:</b> ${esc(m.clarifyMsg||"")}</div></div>`));
       if ((isField() && j.technicianId===S.userId) || S.role==="owner"){
@@ -1963,7 +2127,7 @@ function materialForm(j){
     if (unitCost===null){ toast("Unit cost must be a number, 0 or more.","bad"); return; }
     const file = b.receipt.files[0]; let up = {url:null, assetId:null};
     if (file){ up = await uploadFile(file); if (!up) return; }
-    const rec = {description, qty, unitCost, source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
+    const rec = {description, qty, unitCost, source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, receiptType:file?String(file.type||""):null, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
     const id = await addDoc("jobs/"+j.id+"/materials", rec); if (!id) return;
     sub(j.id).materials.unshift(Object.assign({id}, rec));
     await notify(`New expense on ${j.refNumber}: ${rec.description} (${money(lineTotal(rec))}).`, {toRole:"accountant", jobId:j.id});
@@ -1972,36 +2136,66 @@ function materialForm(j){
 }
 
 /* ---- safety / red tag ---- */
+/* Re-read red tags before a status change, so a tag added or removed on another device is counted. */
+async function freshHazards(){
+  try{
+    const snap = await db.collection("hazards").get();
+    S.hazards = snap.docs.filter(d=>SAFE_ID.test(String(d.id))).map(d=>Object.assign({id:d.id}, d.data()));
+    return true;
+  }catch(e){ console.error(e); toast("Couldn't check the latest red tags. Try again.", "bad"); return false; }
+}
+/* Re-read one red tag in place. null (with a toast) if it can't be read. */
+async function freshHazard(h){
+  let snap;
+  try{ snap = await db.doc("hazards/"+h.id).get(); }
+  catch(e){ console.error(e); toast("Couldn't check the latest version of this red tag. Try again.", "bad"); return null; }
+  if (!snap || !snap.exists){ toast("This red tag no longer exists.", "bad"); return null; }
+  const data = snap.data() || {};
+  Object.keys(h).forEach(k=>{ if (k!=="id") delete h[k]; });
+  Object.assign(h, data);
+  return h;
+}
+/* A step time from a datetime field: required, not in the future, not before the red tag was recorded. */
+function stepTime(input, h, what){
+  const d = input.value ? validDate(input.value) : null;
+  if (!d){ toast(`Enter the date and time for “${what}”.`,"bad"); return null; }
+  if (d.getTime() > Date.now()+5*60000){ toast(`“${what}”: that time is in the future.`,"bad"); return null; }
+  if (hazardAt(h) && d.getTime() < ts(hazardAt(h))-60000){ toast(`“${what}”: that time is before the red tag was recorded (${fmtDate(hazardAt(h))}).`,"bad"); return null; }
+  return d;
+}
 function jobSafety(j){
   const wrap = el(`<div class="stack"></div>`);
   const list = S.hazards.filter(h=>h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId)).sort((a,b)=>ts(b.at)-ts(a.at));
-  const head = el(`<div class="card"><div class="card-h"><div><h3>Unsafe conditions (red tag)</h3><div class="hint">Record any unacceptable condition you find. The record follows the equipment, so the next technician sees it.</div></div>${can.fieldWork(j)?`<button class="btn danger" id="add">${icon("tag","sm")} Report unsafe condition</button>`:""}</div>
+  const canTag = can.fieldWork(j), licOk = hasLic(me(), "G3");
+  const head = el(`<div class="card"><div class="card-h"><div><h3>Unsafe conditions (red tag)</h3><div class="hint">Record any unacceptable condition you find. The record follows the equipment, so the next technician sees it.</div></div>${canTag?`<button class="btn danger" id="add" ${licOk?"":"disabled"}>${icon("tag","sm")} Report unsafe condition</button>`:""}</div>
+    ${canTag && !licOk?`<div class="callout warn" style="margin-bottom:8px">${icon("lock","sm")}<div>Only a licensed gas technician (G3 or higher) can red-tag.</div></div>`:""}
     <div class="hint">Based on a summary of Ontario O. Reg. 212/01 ss. 13–14 (immediate hazard vs. no immediate hazard). Always follow the regulation and CSA B149.1 themselves.</div></div>`);
-  $("#add", head)?.addEventListener("click", ()=>hazardForm(j));
+  if (licOk) $("#add", head)?.addEventListener("click", ()=>hazardForm(j));
   wrap.appendChild(head);
   if (!list.length) wrap.appendChild(el(`<div class="card">${emptyState("shield","No unsafe conditions recorded for this job or its equipment.")}</div>`));
   list.forEach(h=> wrap.appendChild(hazardCard(h, j)));
   return wrap;
 }
 function hazardCard(h, j){
-  const due = h.writtenNoticeDue ? Math.ceil((ts(h.writtenNoticeDue)-Date.now())/DAY) : null;
-  const c = el(`<div class="${h.status==="resolved"?"card":"redtag"}">
-    <div class="row between wrap"><div class="tagh">${icon("tag","sm")} ${h.status==="resolved"?"Resolved":"Red tag"} · ${h.hazardLevel==="immediate"?"Immediate hazard":"No immediate hazard"}</div><span class="hint">${esc(h.by)} · ${esc(fmtDate(h.at))}</span></div>
+  const resolved = h.status==="resolved";
+  const due = noticeDue(h); const days = due ? Math.ceil((ts(due)-Date.now())/DAY) : null;
+  const c = el(`<div class="${resolved?"card":"redtag"}">
+    <div class="row between wrap"><div class="tagh">${icon("tag","sm")} ${resolved?"Red tag removed":"Red tag"} · ${isImmediate(h)?"Immediate hazard":"No immediate hazard"}</div><span class="row wrap">${noticeOverdue(h)?`<span class="pill bad">Overdue — written notice</span>`:""}<span class="hint">${esc(h.by)} · ${esc(fmtDate(h.at))}</span></span></div>
     <p style="margin-top:8px;font-weight:600">${esc(h.description)}</p>
     <div class="kv mt">
       <div><div class="k">Equipment</div><div class="v">${esc(equipmentLabel(equipmentById(h.equipmentId)))}</div></div>
       <div><div class="k">Code reference</div><div class="v">${esc(h.codeRef||"—")}</div></div>
-      <div><div class="k">Gas shut off</div><div class="v">${h.gasShutOff?"Yes":"No"}</div></div>
+      ${isImmediate(h)?"":`<div><div class="k">Gas shut off</div><div class="v">${h.gasShutOff?"Yes":"No"}</div></div>`}
       <div><div class="k">Tag attached</div><div class="v">${h.tagAffixed?"Yes":"No"}</div></div>
-      <div><div class="k">Distributor told (oral)</div><div class="v">${h.distributorNotifiedAt?esc(fmtDate(h.distributorNotifiedAt)):`<span style="color:var(--bad)">Not recorded</span>`}</div></div>
-      <div><div class="k">Written notice to distributor</div><div class="v">${h.writtenNoticeSentAt?"Sent "+esc(fmtDateOnly(h.writtenNoticeSentAt)):due!==null?(due<0?`<span style="color:var(--bad)">Overdue ${-due} day(s)</span>`:`Due in ${due} day(s)`):"—"}</div></div>
       <div><div class="k">Occupant notice given</div><div class="v">${h.userNoticeGiven?"Yes":"No"}</div></div>
       <div><div class="k">TSSA notified</div><div class="v">${h.tssaNotified?"Yes":"Not needed / no"}</div></div>
+      <div><div class="k">Written notice due</div><div class="v">${h.writtenNoticeSentAt?"Sent":due?(days<0?`<span style="color:var(--bad)">Overdue ${-days} day(s)</span>`:`${esc(fmtDateOnly(due))} (${days} day(s))`):"After the gas utility is told"}</div></div>
     </div>
-    ${h.status==="resolved"?`<div class="callout ok mt">${icon("check","sm")}<div>Corrected: ${esc(h.resolution||"")} — ${esc(h.resolvedBy||"")} · ${esc(fmtDateOnly(h.resolvedAt))}</div></div>`:""}
+    <h4 class="mt" style="margin-bottom:6px">Steps</h4><div class="stack tight" data-steps></div>
+    ${resolved?`<div class="callout ok mt">${icon("check","sm")}<div><b>Removed${h.removedByType==="tssa_inspector"?" by a TSSA inspector":""}:</b> ${esc(h.resolvedBy||h.removerName||"")} · ${esc(fmtDateOnly(h.resolvedAt))}<div>Corrective action: ${esc(h.correctiveAction||h.resolution||"")}</div>${h.distributorClearNoticeAt?`<div class="hint">Removal notice sent to the gas distributor: ${esc(fmtDate(h.distributorClearNoticeAt))}</div>`:""}</div></div>`:""}
     <div class="actionbar mt"></div></div>`);
   const ab = $(".actionbar", c);
-  const canAct = S.role!=="accountant" && (!j || !isClosed(j));
+  const jobOpen = !j || !isClosed(j);
   /* Timeline entries go to the job the tag was raised on, or else the job being viewed. */
   const logJobId = (h.jobId && jobById(h.jobId)) ? h.jobId : (j?.id || null);
   const tagName = `${equipmentLabel(equipmentById(h.equipmentId))} at ${customerById(h.customerId)?.name||"site"}`;
@@ -2009,56 +2203,96 @@ function hazardCard(h, j){
     if (logJobId) await logEvent(logJobId, "hazard", {note, hazardId:h.id});
     if (msg) await notify(msg, logJobId?{toRole:"managers", jobId:logJobId}:{toRole:"managers"});
   };
-  if (canAct && h.status!=="resolved"){
-    if (!h.distributorNotifiedAt){
-      const d = el(`<button class="btn sm danger">${icon("phone","sm")} Record distributor notified</button>`);
-      d.addEventListener("click", ()=>distributorForm(h, audit));
-      ab.appendChild(d);
-    }
-    if (!h.writtenNoticeSentAt){
-      const w = el(`<button class="btn sm">${icon("send","sm")} Written notice sent</button>`);
-      w.addEventListener("click", withBusy(w, async ()=>{
-        if (!(await confirmBox("Written notice sent?", `Confirm the written notice about this red tag (${tagName}) has been sent to the gas distributor. This is recorded with your name and today's date.`, "Yes, it was sent"))) return;
-        const p = {writtenNoticeSentAt:now(), writtenNoticeSentBy:me()?.name||""};
-        if (!(await writeDoc("hazards/"+h.id, p, true))) return;
-        Object.assign(h, p);
-        await audit("Red tag: written notice to the gas distributor recorded as sent", `Written notice sent to the distributor for the red tag on ${tagName} (${p.writtenNoticeSentBy||"unknown"}).`);
-        toast("Recorded."); render();
-      }));
-      ab.appendChild(w);
-    }
-    const r = el(`<button class="btn sm go">${icon("check","sm")} Mark corrected</button>`);
-    r.addEventListener("click", ()=>{
-      const b = el(`<form>${modalHead("Mark corrected")}<div class="field"><label>What was done to correct it? *</label><textarea name="r" required></textarea></div><div class="hint mt">Only a certificate holder may remove a posted notice.</div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn go">Save</button></div></form>`);
-      showModal(b);
-      onSubmit(b, async ()=>{
-        const resolution = b.r.value.trim(); if (!resolution){ toast("Say what was done to correct it.","bad"); return; }
-        const p = {status:"resolved", resolution, resolvedBy:me()?.name||"", resolvedAt:now()};
-        if (!(await writeDoc("hazards/"+h.id, p, true))) return;
-        Object.assign(h,p);
-        await audit("Red tag resolved: "+resolution, `Red tag on ${tagName} was marked corrected by ${p.resolvedBy||"unknown"}: ${resolution}`);
-        closeOverlay(); toast("Red tag resolved."); render();
-      });
-    });
+  hazardSteps(h).forEach(st=>{
+    const n = HZ_STEPS.indexOf(st)+1;
+    const info = h[st.k] ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}`
+      : st.k==="gasShutOffAt" && h.gasShutOff ? "Ticked as shut off when reported, but no time recorded."
+      : st.k==="writtenNoticeSentAt" && due ? `Not sent yet — due by ${esc(fmtDateOnly(due))}` : "Not recorded";
+    const row = el(`<div class="note row between wrap"><div><b>${n}. ${esc(st.label)}</b><div class="hint">${info}</div></div></div>`);
+    /* The written notice can still be recorded after the job is closed or the tag removed. */
+    const allowed = S.role!=="accountant" && !h[st.k] && (st.k==="writtenNoticeSentAt" || (!resolved && jobOpen));
+    if (allowed){ const b = el(`<button type="button" class="btn sm ${st.k==="writtenNoticeSentAt"?"":"danger"}">${icon("clock","sm")} Record</button>`); b.addEventListener("click", ()=>stepForm(h, st, audit, tagName)); row.appendChild(b); }
+    $("[data-steps]", c).appendChild(row);
+  });
+  if (!resolved && S.role!=="accountant" && jobOpen){
+    const r = el(`<button type="button" class="btn sm go">${icon("check","sm")} Remove red tag</button>`);
+    r.addEventListener("click", ()=>clearForm(h, audit, tagName));
     ab.appendChild(r);
   }
   return c;
 }
-function distributorForm(h, audit){
-  const b = el(`<form>${modalHead("Record distributor notified", "When was the gas distributor told about this condition?")}
-    <div class="field"><label>Distributor notified orally at *</label><input type="datetime-local" name="when" required></div>
-    <div class="hint mt">Written notice to the distributor is tracked as due 14 days after this time.</div>
+function stepForm(h, st, audit, tagName){
+  const b = el(`<form>${modalHead(st.label, tagName)}
+    <div class="field"><label>Date and time *</label><input type="datetime-local" name="when"></div>
+    <div class="hint mt">Not in the future, and not before the red tag was recorded (${esc(fmtDate(hazardAt(h)))}).</div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    const d = validDate(b.when.value); if (!d){ toast("Enter the date and time the distributor was told.","bad"); return; }
-    if (d.getTime() > Date.now()+5*60000){ toast("That time is in the future.","bad"); return; }
-    const p = {distributorNotifiedAt:d.toISOString(), distributorNotifiedRecordedBy:me()?.name||"", distributorNotifiedRecordedAt:now()};
-    if (!h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
+    const d = stepTime(b.when, h, st.label); if (!d) return;
+    if (!(await freshHazard(h))) return;
+    if (h[st.k]){ toast("This step was already recorded on another device.","bad"); closeOverlay(); render(); return; }
+    const p = {[st.k]:d.toISOString(), [st.by]:me()?.name||"", [st.rec]:now()};
+    if (st.k==="gasShutOffAt") p.gasShutOff = true;
+    if (st.k==="distributorNotifiedAt" && !isImmediate(h) && !h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
     if (!(await writeDoc("hazards/"+h.id, p, true))) return;
     Object.assign(h, p);
-    await audit(`Red tag: gas distributor notified orally at ${fmtDate(p.distributorNotifiedAt)}`, null);
-    closeOverlay(); toast("Distributor notification recorded."); render();
+    await audit(`Red tag step: ${st.label} — ${fmtDate(p[st.k])}`, `Red tag on ${tagName}: ${st.label.toLowerCase()} (recorded by ${p[st.by]||"unknown"}).`);
+    closeOverlay(); toast("Recorded."); render();
+  });
+}
+/* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h. */
+function clearRule(h){
+  const e = equipmentById(h.equipmentId); const btu = Number(e?.inputBtuh);
+  const known = Number.isFinite(btu) && btu>0;
+  const need = known && btu>400000 ? "G1" : "G2";
+  const u = me(); let why = "";
+  if (!u) why = "Choose who you are first.";
+  else if (licOf(u)==="G3") why = "A G3 cannot remove a red tag. A G2 or G1 must verify the repair.";
+  else if (!hasLic(u, need)) why = need==="G1" ? "This appliance is over 400,000 BTU/h. Only a G1 can remove this red tag." : "Only a G2 or G1 gas technician can remove a red tag.";
+  return {ok:!why, why, known};
+}
+function clearForm(h, audit, tagName){
+  const rule = clearRule(h); const u = me()||{};
+  const b = el(`<form>${modalHead("Remove red tag", tagName)}
+    <div class="field"><label>Corrective action — what was repaired *</label><textarea name="fixText"></textarea></div>
+    <div class="field mt"><label>Removed by *</label>
+      <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me${rule.ok?"":`<div class="hint">${esc(rule.why)}</div>`}</span></label>
+      <label class="check"><input type="radio" name="who" value="inspector" ${rule.ok?"":"checked"}><span>A TSSA inspector</span></label></div>
+    ${rule.known?"":`<div class="callout warn mt">${icon("alert","sm")}<div>The input rating (BTU/h) is not recorded for this equipment, so a G2 or G1 is needed. Add it on the equipment if you know it.</div></div>`}
+    <div class="grid g2 mt" data-me ${rule.ok?"":"hidden"}>
+      <div class="field"><label>Your name *</label><input name="rname" value="${esc(u.name||"")}"></div>
+      <div class="field"><label>TSSA certificate number *</label><input name="rcert" value="${esc(u.tssaCertNumber||"")}"></div>
+      <div class="field" style="grid-column:1/-1"><label>Your address *</label><input name="raddr" value="${esc(u.address||"")}"></div>
+    </div>
+    <div class="field mt" data-in ${rule.ok?"hidden":""}><label>Inspector name *</label><input name="inspector"></div>
+    <div class="field mt"><label>Removal notice sent to the gas distributor at *</label><input type="datetime-local" name="notice"></div>
+    <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn go">${icon("check","sm")} Remove red tag</button></div></form>`);
+  showModal(b, {wide:true});
+  const sync = ()=>{ const w = b.who.value; $("[data-me]", b).hidden = w!=="me"; $("[data-in]", b).hidden = w!=="inspector"; };
+  $$("input[name=who]", b).forEach(x=>x.addEventListener("change", sync));
+  onSubmit(b, async ()=>{
+    const action = b.fixText.value.trim(); if (!action){ toast("Write the corrective action first.","bad"); return; }
+    const who = b.who.value;
+    if (who!=="me" && who!=="inspector"){ toast("Choose who removed the red tag.","bad"); return; }
+    let removerName, removerAddress = "", removerTssaCert = "";
+    if (who==="me"){
+      const r = clearRule(h); if (!r.ok){ toast(r.why,"bad"); return; }
+      removerName = b.rname.value.trim(); removerAddress = b.raddr.value.trim(); removerTssaCert = b.rcert.value.trim();
+      if (!removerName || !removerAddress || !removerTssaCert){ toast("Enter your name, address and TSSA certificate number.","bad"); return; }
+    } else {
+      removerName = b.inspector.value.trim(); if (!removerName){ toast("Enter the inspector's name.","bad"); return; }
+    }
+    const notice = stepTime(b.notice, h, "Removal notice sent to the gas distributor"); if (!notice) return;
+    if (!(await freshHazard(h))) return;
+    if (h.status==="resolved"){ toast("This red tag was already removed on another device.","bad"); closeOverlay(); render(); return; }
+    const at = now();
+    const p = {status:"resolved", removedByType:who==="me"?"technician":"tssa_inspector", removerName, removerAddress, removerTssaCert, removerUserId:who==="me"?(S.userId||null):null,
+      correctiveAction:action, clearedAt:at, distributorClearNoticeAt:notice.toISOString(), clearRecordedBy:me()?.name||"", clearRecordedById:S.userId||null,
+      resolution:action, resolvedBy:who==="me"?removerName:"TSSA inspector "+removerName, resolvedAt:at};
+    if (!(await writeDoc("hazards/"+h.id, p, true))) return;
+    Object.assign(h, p);
+    await audit(`Red tag removed by ${p.resolvedBy}. Corrective action: ${action}`, `Red tag on ${tagName} was removed by ${p.resolvedBy}: ${action}`);
+    closeOverlay(); toast("Red tag removed."); render();
   });
 }
 function hazardForm(j){
@@ -2068,63 +2302,75 @@ function hazardForm(j){
       <div class="field"><label>Hazard level *</label><select name="level"><option value="immediate">Immediate hazard</option><option value="not_immediate">No immediate hazard</option></select></div>
       <div class="field" style="grid-column:1/-1"><label>What did you find? *</label><textarea name="description" required placeholder="Objective observations only."></textarea></div>
       <div class="field"><label>Code clause (CSA B149.1 / regulation)</label><input name="codeRef" placeholder="e.g. B149.1 clause …"></div>
-      <div class="field"><label>Distributor notified orally at</label><input type="datetime-local" name="notified"><div class="hint">Leave empty if not yet told — you can record it later on the red tag.</div></div>
+      <div class="field" data-notimm><label>Distributor notified orally at</label><input type="datetime-local" name="notified"><div class="hint">Leave empty if not yet told — you can record it later on the red tag.</div></div>
     </div>
+    <div class="callout warn mt" data-imm>${icon("clock","sm")}<div>After saving, record each step with its time on the red tag: 1) gas shut off, 2) customer informed, 3) gas utility told verbally, 4) written notice sent to the gas utility (due within 14 days).</div></div>
     <div class="stack tight mt">
-      <label class="check"><input type="checkbox" name="gasShutOff"><span>Gas supply shut off to the appliance</span></label>
+      <label class="check" data-notimm><input type="checkbox" name="gasShutOff"><span>Gas supply shut off to the appliance</span></label>
       <label class="check"><input type="checkbox" name="tagAffixed" checked><span>Warning tag attached to the appliance</span></label>
       <label class="check"><input type="checkbox" name="userNotice"><span>Written notice given to the occupant (required by regulation)</span></label>
       <label class="check"><input type="checkbox" name="tssa"><span>TSSA notified (CO poisoning, asphyxiation, explosion or fire may be gas-related)</span></label>
     </div>
-    <div class="hint mt">Written notice to the distributor is tracked as due 14 days after the oral notice.</div>
+    <div class="hint mt" data-notimm>Written notice to the distributor is tracked as due 14 days after the oral notice.</div>
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn danger solid">${icon("tag","sm")} Save red tag</button></div></form>`);
   showModal(b, {wide:true});
-  b.level.addEventListener("change", ()=>{ b.gasShutOff.checked = b.level.value==="immediate"; });
-  b.gasShutOff.checked = true;
+  const sync = ()=>{ const imm = b.level.value==="immediate"; $$("[data-notimm]", b).forEach(n=>n.hidden = imm); $$("[data-imm]", b).forEach(n=>n.hidden = !imm); };
+  b.level.addEventListener("change", sync); sync();
   onSubmit(b, async ()=>{
+    if (!hasLic(me(), "G3")){ toast("Only a licensed gas technician (G3 or higher) can red-tag.","bad"); return; }
     const description = b.description.value.trim(); if (!description){ toast("Describe what you found.","bad"); return; }
+    const imm = b.level.value==="immediate";
     let notified = null;
-    if (b.notified.value){
+    if (!imm && b.notified.value){
       const d = validDate(b.notified.value); if (!d){ toast("Enter a valid date and time for the distributor notice.","bad"); return; }
       if (d.getTime() > Date.now()+5*60000){ toast("The distributor notice time is in the future.","bad"); return; }
       notified = d.toISOString();
     }
+    const at = now();
     const rec = {jobId:j.id, equipmentId:b.equipmentId.value||null, customerId:j.customerId, hazardLevel:b.level.value, description, codeRef:b.codeRef.value.trim(),
-      gasShutOff:b.gasShutOff.checked, tagAffixed:b.tagAffixed.checked, userNoticeGiven:b.userNotice.checked, tssaNotified:b.tssa.checked,
-      distributorNotifiedAt:notified, writtenNoticeDue:notified?new Date(ts(notified)+14*DAY).toISOString():null, status:"open", by:me()?.name||"", byId:S.userId, at:now()};
+      gasShutOff:imm?false:b.gasShutOff.checked, tagAffixed:b.tagAffixed.checked, userNoticeGiven:b.userNotice.checked, tssaNotified:b.tssa.checked,
+      distributorNotifiedAt:notified, status:"open", by:me()?.name||"", byId:S.userId, at, createdAt:at};
+    if (notified){ rec.distributorNotifiedRecordedBy = rec.by; rec.distributorNotifiedRecordedAt = at; }
+    if (imm) rec.writtenNoticeDueAt = new Date(ts(at)+14*DAY).toISOString();
+    else rec.writtenNoticeDue = notified ? new Date(ts(notified)+14*DAY).toISOString() : null;
     const id = uid("hz"); if (!(await writeDoc("hazards/"+id, rec))) return;
     S.hazards.push(Object.assign({id}, rec));
-    await logEvent(j.id, "hazard", {note:(rec.hazardLevel==="immediate"?"Immediate hazard: ":"Unsafe condition: ")+rec.description});
+    await logEvent(j.id, "hazard", {note:(imm?"Immediate hazard: ":"Unsafe condition: ")+rec.description, hazardId:id});
     await notify(`Red tag on ${j.refNumber}: ${rec.description}`, {toRole:"managers", jobId:j.id});
-    closeOverlay(); toast("Red tag saved. It now shows on the equipment passport."); render();
+    closeOverlay(); toast(imm ? "Red tag saved. Now record each step with its time on the red tag." : "Red tag saved. It now shows on the equipment passport."); render();
   });
 }
 
 /* ---- completion checklist ---- */
+/* safety:true items can never be skipped (no "Close anyway"). Other missing items can be closed anyway with a reason. */
 function completionItems(j){
   const s = sub(j.id), items = [];
+  const hz = jobHazards(j), imm = hz.filter(isImmediate);
   items.push({label:"a work note", ok:s.notes.length>0, tab:"notes", hint:"What you found and what you did."});
   items.push({label:"at least one photo", ok:s.media.length>0, tab:"media", hint:"Before / after or the nameplate."});
   if (S.config.modules.leakTest){
     const k = leakResultKind(j.leakTest);
-    /* Fail / Inconclusive show as NOT OK (red). noBlock: whether that should stop submission is an owner decision, so it doesn't block yet. */
-    if (k && k!=="pass") items.push({label:`leak test result: ${k==="fail"?"FAIL":k==="inconclusive"?"inconclusive":"unknown"}`, ok:false, bad:true, noBlock:true, tab:"leak", hint:"The leak test did not pass. Fix and re-test, then change the result."});
+    /* Fail / Inconclusive blocks closing unless the appliance is red-tagged. A later passing re-test replaces the result. */
+    if (k && k!=="pass") items.push({label:`leak test result: ${k==="fail"?"FAIL":k==="inconclusive"?"inconclusive":"unknown"}${hz.length?" (appliance red-tagged)":""}`, ok:hz.length>0, bad:!hz.length, safety:true, tab:"leak", hint:"The leak test did not pass. Fix and re-test and record a Pass, or red-tag the appliance."});
     else items.push({label:"leak test recorded or skipped", ok:["completed","skipped"].includes(j.leakTest?.status), tab:"leak", hint:leakRelevant(j)?"Recommended for this job.":"Optional — record or skip."});
   }
   const def = readingDef(j); const req = def.checks.filter(c=>c[2]);
-  req.forEach(([k,label])=> items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:!!(j.readings||{})[k], tab:"readings", hint:"Confirm it in Readings."}));
-  /* Open red tags on this job OR on the same equipment from an earlier visit. */
-  const hz = openHazards(h=>h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId));
-  if (hz.length) items.push({label:"red tag: distributor notice time recorded", ok:hz.every(h=>h.distributorNotifiedAt), tab:"safety", hint:"Record when the gas distributor was told."});
+  req.forEach(([k,label])=>{
+    if (k==="leftSafe" && imm.length) items.push({label:"appliance is red-tagged — gas shut off", ok:imm.every(h=>!!h.gasShutOffAt), bad:true, safety:true, tab:"safety", hint:"Record the time the gas was shut off on the red tag."});
+    else items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:!!(j.readings||{})[k], safety:k==="leftSafe", tab:"readings", hint:"Confirm it in Readings."});
+  });
+  if (imm.length) items.push({label:"red tag steps 1–3 recorded (gas shut off, customer informed, gas utility told)", ok:imm.every(h=>HZ_STEPS.slice(0,3).every(st=>!!h[st.k])), bad:true, safety:true, tab:"safety", hint:"Record each step with its time on the red tag."});
+  const other = hz.filter(h=>!isImmediate(h));
+  if (other.length) items.push({label:"red tag: distributor notice time recorded", ok:other.every(h=>h.distributorNotifiedAt), tab:"safety", hint:"Record when the gas distributor was told."});
   items.push({label:"help requests answered", ok:s.help.every(h=>h.status==="resolved"), tab:"overview", hint:"Wait for the supervisor's answer."});
   return items;
 }
 function jobChecklist(j){
   const items = completionItems(j); const done = items.filter(i=>i.ok).length;
-  const wrap = el(`<div class="card"><div class="row" style="gap:14px"><div class="ring" style="--p:${Math.round(done/items.length*100)}"><span>${done}/${items.length}</span></div><div><h3>Closing checklist</h3><div class="hint">Trade team only. The technician submits when everything is in; a supervisor approves and the job is closed and archived. The customer is not involved.</div></div></div>
+  const wrap = el(`<div class="card"><div class="row" style="gap:14px"><div class="ring" style="--p:${Math.round(done/items.length*100)}"><span>${done}/${items.length}</span></div><div><h3>Closing checklist</h3><div class="hint">Trade team only. The technician submits when everything is in; a supervisor approves and the job is closed and archived. Safety items can't be skipped. The customer is not involved.</div></div></div>
     <div class="stack tight mt" id="l"></div></div>`);
   items.forEach(i=>{
-    const r = el(`<div class="check" style="cursor:pointer;align-items:center"><span class="pill ${i.ok?"ok":i.bad?"bad":"warn"}">${i.ok?"Done":i.bad?"Not OK":"Needed"}</span><div style="flex:1"><b>${esc(cap(i.label))}</b>${i.ok?"":`<div class="hint">${esc(i.hint)}</div>`}</div>${i.ok?"":icon("chev","sm")}</div>`);
+    const r = el(`<div class="check" style="cursor:pointer;align-items:center"><span class="pill ${i.ok?"ok":i.bad?"bad":"warn"}">${i.ok?"Done":i.bad?"Not OK":"Needed"}</span><div style="flex:1"><b>${esc(cap(i.label))}</b>${i.ok?"":`<div class="hint">${esc(i.hint)}${i.safety?" Safety item — can't be skipped.":""}</div>`}</div>${i.ok?"":icon("chev","sm")}</div>`);
     if (!i.ok) r.addEventListener("click", ()=>{ S.view.jobTab = i.tab; renderMain(); });
     $("#l", wrap).appendChild(r);
   });
@@ -2137,7 +2383,7 @@ function timelineItem(f){
   let kind = f.kind==="event" ? (f.type || (f.status?"status":"edited")) : f.kind;
   let text = f.text || "";
   if (f.kind==="event"){
-    if (kind==="status") text = f.status==="completed" ? "Approved and closed" : `Status → ${STATUS[f.status]?.label||f.status}`;
+    if (kind==="status") text = f.status==="completed" ? (f.note || "Approved and closed") : `Status → ${STATUS[f.status]?.label||f.status}`;
     else if (kind==="created") text = "Job created" + (f.note?` · ${f.note}`:"");
     else if (kind==="sent_back") text = "Sent back: "+(f.note||"");
     else text = f.note || cap(kind);
@@ -2151,7 +2397,6 @@ function jobTimeline(j, s){
   s.events.forEach(e=>f.push(Object.assign({kind:"event"}, e)));
   s.notes.forEach(n=>f.push({kind:"note", at:n.at, by:n.by, text:"Note: "+n.text}));
   s.media.forEach(m=>f.push({kind:"media", at:m.at, by:m.by, text:`${m.category||"Photo"} added${m.caption?" — "+m.caption:""}`}));
-  s.extractions.forEach(x=>f.push({kind:"reading", at:x.at, by:x.confirmedBy, text:`Reading confirmed from photo: ${x.finalValue} ${x.unit} (${x.context})`}));
   s.materials.forEach(m=>f.push({kind:"material", at:m.at, by:m.by, text:`Expense: ${m.description} — ${money(lineTotal(m))}`}));
   s.help.forEach(h=>{ f.push({kind:"help", at:h.at, by:h.by, text:"Asked for help: "+h.message}); if (h.response) f.push({kind:"answer", at:h.resolvedAt||h.at, by:h.resolvedBy, text:"Answered: "+h.response}); });
   f.sort((a,b)=>ts(a.at)-ts(b.at));
@@ -2230,7 +2475,7 @@ function equipmentForm(e, presetCustomer){
       <div class="field"><label>Serial number *</label><input name="serial" required value="${esc(e?.serial||"")}"></div>
       <div class="field"><label>Type</label><input name="type" list="eqTypes" value="${esc(e?.type||"")}" placeholder="Furnace, A/C, water heater…"><datalist id="eqTypes"><option>Furnace</option><option>Air conditioner</option><option>Heat pump</option><option>Boiler</option><option>Water heater</option><option>Tankless water heater</option><option>HRV / ERV</option><option>Fireplace</option><option>Electrical panel</option></datalist></div>
       <div class="field"><label>Fuel / power</label><input name="fuel" value="${esc(e?.fuel||"")}" placeholder="Natural gas, propane, electric"></div>
-      <div class="field"><label>Input rating</label><input name="input" value="${esc(e?.input||"")}" placeholder="e.g. 60,000 BTU/h"></div>
+      <div class="field"><label>Input rating (BTU/h)</label><input name="inputBtuh" inputmode="numeric" value="${esc(e?.inputBtuh??"")}" placeholder="e.g. 60000"></div>
       <div class="field"><label>Refrigerant</label><input name="refrigerant" value="${esc(e?.refrigerant||"")}" placeholder="R-410A, R-454B…"></div>
       <div class="field"><label>Filter size</label><input name="filterSize" value="${esc(e?.filterSize||"")}" placeholder="16x25x1"></div>
       <div class="field"><label>Install date</label><input name="installDate" type="date" value="${esc(e?.installDate||"")}"></div>
@@ -2241,8 +2486,11 @@ function equipmentForm(e, presetCustomer){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${editing?"Save":"Add equipment"}</button></div></form>`);
   showModal(b, {wide:true});
   onSubmit(b, async ()=>{
-    const data = {}; ["manufacturer","model","serial","type","fuel","input","refrigerant","filterSize","installDate","warrantyUntil","notes"].forEach(k=>data[k]=b[k].value.trim());
+    const data = {}; ["manufacturer","model","serial","type","fuel","refrigerant","filterSize","installDate","warrantyUntil","notes"].forEach(k=>data[k]=b[k].value.trim());
     data.siteCustomerId = b.siteCustomerId.value||null;
+    const btuIn = b.inputBtuh.value.replace(/[,\s]/g,"");
+    if (btuIn){ const n = parseNum(btuIn, false); if (n===null || n<=0){ toast("Input rating must be a number of BTU/h, e.g. 60000.","bad"); return; } data.inputBtuh = n; }
+    else data.inputBtuh = null;
     const missing = [["manufacturer","Manufacturer"],["model","Model"],["serial","Serial number"]].find(([k])=>!data[k]);
     if (missing){ toast(`Enter the ${missing[1].toLowerCase()}.`,"bad"); return; }
     const dup = S.equipment.find(x=>x.serial && String(x.serial).toLowerCase()===data.serial.toLowerCase() && x.id!==e?.id);
@@ -2272,7 +2520,7 @@ function renderEquipmentDetail(id){
     <div><div class="k">Customer</div><div class="v">${c?(isField()||S.role==="accountant"?esc(c.name):`<a href="#" id="cl">${esc(c.name)}</a>`):"—"}</div></div>
     <div><div class="k">Address</div><div class="v">${esc(c?.address||"—")}</div></div>
     <div><div class="k">Age</div><div class="v">${esc(equipmentAge(e))}</div></div>
-    <div><div class="k">Input rating</div><div class="v">${esc(e.input||"—")}</div></div>
+    <div><div class="k">Input rating</div><div class="v">${Number(e.inputBtuh)>0?esc(Number(e.inputBtuh).toLocaleString())+" BTU/h":e.input?esc(e.input)+` <span class="hint">(text only — enter the number in Edit)</span>`:"Not recorded"}</div></div>
     <div><div class="k">Refrigerant</div><div class="v">${esc(e.refrigerant||"—")}</div></div>
     <div><div class="k">Filter size</div><div class="v mono">${esc(e.filterSize||"—")}</div></div>
     <div><div class="k">Warranty</div><div class="v">${e.warrantyUntil?(ts(e.warrantyUntil)>Date.now()?"Until "+esc(fmtDateOnly(e.warrantyUntil)):"Expired "+esc(fmtDateOnly(e.warrantyUntil))):"—"}</div></div>
@@ -2466,8 +2714,9 @@ function expenseTable(list){
   if (!list.length) return el(`<div class="card">${emptyState("receipt","Nothing here.")}</div>`);
   const t = el(`<div class="card pad0"><div class="tablewrap"><table><thead><tr><th>Job</th><th>Item</th><th>Amount</th><th>By</th><th>Receipt</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></div>`);
   list.forEach(({job,item})=>{
-    const tr = el(`<tr><td><a href="#" class="mono">${esc(job.refNumber)}</a></td><td><b>${esc(item.description)}</b><div class="tiny faint">${esc(item.qty)} × ${money(item.unitCost)} · ${esc(item.source||"")}</div>${item.reply?`<div class="tiny">Tech reply: ${esc(item.reply)}</div>`:""}</td><td class="mono">${money(lineTotal(item))}</td><td>${esc(item.by||"")}</td><td>${item.receiptUrl?(safeUrl(item.receiptUrl,"href")?`<a href="${esc(safeUrl(item.receiptUrl,"href"))}" target="_blank" rel="noopener noreferrer">View</a>`:`<span class="pill nodot slate" title="Stored, but this link type can't be opened here">Stored</span>`):`<span class="pill nodot warn">None</span>`}</td><td>${expensePill(item.status)}</td><td class="act"></td></tr>`);
+    const tr = el(`<tr><td><a href="#" class="mono">${esc(job.refNumber)}</a></td><td><b>${esc(item.description)}</b><div class="tiny faint">${esc(item.qty)} × ${money(item.unitCost)} · ${esc(item.source||"")}</div>${item.reply?`<div class="tiny">Tech reply: ${esc(item.reply)}</div>`:""}</td><td class="mono">${money(lineTotal(item))}</td><td>${esc(item.by||"")}</td><td>${item.receiptUrl?(receiptKind(item.receiptUrl)?`<button type="button" class="btn sm" data-rc>View</button>`:`<span class="pill nodot slate" title="Stored, but this file type can't be opened here">Stored</span>`):`<span class="pill nodot warn">None</span>`}</td><td>${expensePill(item.status)}</td><td class="act"></td></tr>`);
     $("a", tr).addEventListener("click", e=>{ e.preventDefault(); openJob(job.id, "materials"); });
+    $("[data-rc]", tr)?.addEventListener("click", ()=>openReceipt(item));
     if (can.expenses() && (item.status||"pending")==="pending"){
       const a = el(`<button class="btn go sm">Approve</button>`), r = el(`<button class="btn danger sm">Reject</button>`), q = el(`<button class="btn sm">Ask</button>`);
       a.addEventListener("click", withBusy([a, r, q], ()=>decideExpense(job, item, "approved")));
@@ -2537,7 +2786,7 @@ function renderTeam(){
   $("#add", wrap).addEventListener("click", ()=>userForm());
   S.users.slice().sort((a,b)=>(b.active!==false)-(a.active!==false) || String(a.name).localeCompare(b.name)).forEach(u=>{
     const creds = (u.credentials||[]).map(c=>{ const d = c.expires?Math.ceil((ts(c.expires)-Date.now())/DAY):null; return `<span class="pill ${d===null?"slate":d<0?"bad":d<=60?"warn":"ok"}" title="${esc(c.number||"")}">${esc(c.name)}${d!==null?` · ${d<0?"expired":"exp. "+fmtDateOnly(c.expires)}`:""}</span>`; }).join(" ");
-    const c = el(`<div class="card" style="${u.active===false?"opacity:.55":""}"><div class="row">${avatar(u,"lg")}<div style="flex:1;min-width:0"><b>${esc(u.name)}</b><div class="hint">${esc(ROLE_LABELS[u.role]||u.role)} · ${esc(THEMES[u.trade]?.label||"—")}</div></div><button class="btn ghost sm" aria-label="Edit">${icon("pencil","sm")}</button></div>
+    const c = el(`<div class="card" style="${u.active===false?"opacity:.55":""}"><div class="row">${avatar(u,"lg")}<div style="flex:1;min-width:0"><b>${esc(u.name)}</b><div class="hint">${esc(ROLE_LABELS[u.role]||u.role)} · ${esc(THEMES[u.trade]?.label||"—")}</div></div><span class="pill nodot ${licOf(u)==="none"?"slate":"info"}" title="${esc(u.tssaCertNumber?"TSSA cert "+u.tssaCertNumber:"")}">${licOf(u)==="none"?"No gas licence":esc(licOf(u))}</span><button class="btn ghost sm" aria-label="Edit">${icon("pencil","sm")}</button></div>
       <div class="row wrap mt">${creds||`<span class="hint">No licences on file.</span>`}</div>${u.active===false?`<div class="mt"><span class="pill slate">Deactivated</span></div>`:""}</div>`);
     $("button", c).addEventListener("click", ()=>userForm(u));
     $("#g", wrap).appendChild(c);
@@ -2551,6 +2800,9 @@ function userForm(u){
     <div class="field"><label>Email</label><input name="email" type="email" value="${esc(u?.email||"")}"></div>
     <div class="field"><label>Role *</label><select name="role">${Object.entries(ROLE_LABELS).map(([k,v])=>`<option value="${k}" ${u?.role===k?"selected":""}>${v}</option>`).join("")}</select></div>
     <div class="field"><label>Trade</label><select name="trade">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${u?.trade===k?"selected":""}>${v.label}</option>`).join("")}</select></div>
+    <div class="field"><label>Gas licence</label><select name="gasLicence">${GAS_LICENCES.map(l=>`<option value="${l}" ${licOf(u)===l?"selected":""}>${l==="none"?"None":l}</option>`).join("")}</select></div>
+    <div class="field"><label>TSSA certificate number</label><input name="tssaCertNumber" value="${esc(u?.tssaCertNumber||"")}"></div>
+    <div class="field" style="grid-column:1/-1"><label>Address</label><input name="address" value="${esc(u?.address||"")}" placeholder="Used on red-tag removal records"></div>
     <div class="field" style="grid-column:1/-1"><label>Supervisor (for apprentices)</label><select name="supervisorId"><option value="">—</option>${activeUsers().filter(x=>x.role==="supervisor"||x.role==="owner").map(x=>`<option value="${esc(x.id)}" ${u?.supervisorId===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div></div>
     <h4 class="mt2" style="margin-bottom:8px">Licences &amp; certificates</h4><div class="stack tight" id="cl"></div>
     <button type="button" class="btn sm mt" id="ac">${icon("plus","sm")} Add licence</button>
@@ -2564,7 +2816,8 @@ function userForm(u){
   $("#ac", b).addEventListener("click", ()=>{ creds.push({name:"", number:"", expires:""}); drawC(); });
   showModal(b, {wide:true});
   onSubmit(b, async ()=>{
-    const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null, credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()}))};
+    const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null,
+      gasLicence:GAS_LICENCES.includes(b.gasLicence.value)?b.gasLicence.value:"none", tssaCertNumber:b.tssaCertNumber.value.trim(), address:b.address.value.trim(), credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()}))};
     if (!d.name){ toast("Enter the person's full name.","bad"); return; }
     if (u){
       d.active = b.active.checked;
@@ -2573,7 +2826,7 @@ function userForm(u){
       /* If you edited the person you're viewing as, keep the role in step (or pick someone else if deactivated). */
       if (u.id===S.userId){ closeOverlay(); toast("Saved."); if (u.active===false || !ROLE_LABELS[u.role]) restoreUser(); else { S.role = u.role; lsSet("sr_role", u.role); render(); } return; }
     }
-    else { const id = uid("user"); d.active = true; d.createdAt = now(); if (!(await writeDoc("users/"+id, d))) return; S.users.push(Object.assign({id}, d)); }
+    else { const id = uid("user"); d.active = true; d.createdAt = now(); if (!(await writeDoc("users/"+id, d))) return; const nu = Object.assign({id}, d); normalizeUser(nu); S.users.push(nu); }
     closeOverlay(); toast("Saved."); render();
   });
 }
@@ -2583,7 +2836,7 @@ function skillStats(u){
   const jobs = S.jobs.filter(j=>j.technicianId===u.id); const closed = jobs.filter(isClosed);
   const s = jobs.map(j=>sub(j.id));
   return {closed:closed.length, byType:JOB_TYPES.map(t=>[cap(t), closed.filter(j=>j.jobType===t).length]).filter(r=>r[1]),
-    readings:jobs.filter(j=>j.readings && Object.keys(j.readings).length>2).length + s.reduce((n,x)=>n+x.extractions.length,0),
+    readings:jobs.filter(j=>j.readings && Object.keys(j.readings).length>2).length,
     leak:jobs.filter(j=>j.leakTest?.status==="completed").length, help:s.reduce((n,x)=>n+x.help.length,0),
     sentBack:jobs.reduce((n,j)=>n+(j.sendBacks||0),0), firstPass:closed.filter(j=>!(j.sendBacks>0)).length};
 }
@@ -2664,7 +2917,7 @@ function auditRows(){
     s.help.filter(h=>h.resolvedAt).forEach(h=>rows.push({at:h.resolvedAt, by:h.resolvedBy, what:`${j.refNumber}: answered help request`}));
   });
   S.consent.filter(c=>c.type==="qr_activation").forEach(c=>rows.push({at:c.at, by:c.by||"—", what:`QR ${c.result} · ${equipmentLabel(equipmentById(c.equipmentId))}${c.signedName?" · signed by "+c.signedName:""}`}));
-  S.hazards.forEach(h=>{ rows.push({at:h.at, by:h.by, what:`Red tag opened · ${equipmentLabel(equipmentById(h.equipmentId))}: ${h.description}`}); if (h.resolvedAt) rows.push({at:h.resolvedAt, by:h.resolvedBy, what:`Red tag resolved · ${h.resolution||""}`}); });
+  S.hazards.forEach(h=>{ rows.push({at:h.at, by:h.by, what:`Red tag opened · ${equipmentLabel(equipmentById(h.equipmentId))}: ${h.description}`}); if (h.resolvedAt) rows.push({at:h.resolvedAt, by:h.clearRecordedBy||h.resolvedBy, what:`Red tag removed by ${h.resolvedBy||"—"} · ${h.correctiveAction||h.resolution||""}`}); });
   return rows.sort((a,b)=>ts(b.at)-ts(a.at));
 }
 function renderAudit(){
@@ -2740,13 +2993,13 @@ async function seedPreview(){
   await put("app","config", {seedVersion:2, companyName:keepName?S.config.companyName:"Northline Heating & Cooling (example)", activeTheme:S.config.activeTheme||"hvac", trades:["hvac","electrical"], theme:S.config.theme||"system",
     modules:{leakTest:S.config.modules.leakTest!==false, gps:!!S.config.modules.gps, skillPassport:S.config.modules.skillPassport!==false}, gpsPolicy:S.config.gpsPolicy});
   const users = {
-    u_owner:{name:"Dana Whitfield", role:"owner", trade:"hvac", credentials:[{name:"G2 Gas Technician", number:"", expires:at(400)}]},
-    u_dispatch:{name:"Marcus Ibe", role:"dispatcher", trade:"hvac", credentials:[]},
-    u_super:{name:"Priya Nandan", role:"supervisor", trade:"hvac", credentials:[{name:"G1 Gas Technician", number:"", expires:at(300)},{name:"ODP", number:"", expires:""}]},
-    u_tech1:{name:"Jordan Cole", role:"technician", trade:"hvac", credentials:[{name:"G2 Gas Technician", number:"", expires:at(41)},{name:"ODP", number:"", expires:""}]},
-    u_tech2:{name:"Sam Reyes", role:"technician", trade:"electrical", credentials:[{name:"309A Electrician", number:"", expires:at(500)}]},
-    u_appr:{name:"Alex Kim", role:"apprentice", trade:"hvac", supervisorId:"u_super", credentials:[{name:"G3 Gas Technician", number:"", expires:at(700)}]},
-    u_acct:{name:"Farah Haddad", role:"accountant", trade:"hvac", credentials:[]},
+    u_owner:{name:"Dana Whitfield", role:"owner", trade:"hvac", gasLicence:"G1", tssaCertNumber:"TEST-000101", address:"10 Example Ave, London, ON", credentials:[{name:"G1 Gas Technician", number:"TEST-000101", expires:at(400)}]},
+    u_dispatch:{name:"Marcus Ibe", role:"dispatcher", trade:"hvac", gasLicence:"none", tssaCertNumber:"", address:"22 Sample St, London, ON", credentials:[]},
+    u_super:{name:"Priya Nandan", role:"supervisor", trade:"hvac", gasLicence:"G2", tssaCertNumber:"TEST-000123", address:"35 Demo Cres, London, ON", credentials:[{name:"G2 Gas Technician", number:"TEST-000123", expires:at(300)},{name:"ODP", number:"", expires:""}]},
+    u_tech1:{name:"Jordan Cole", role:"technician", trade:"hvac", gasLicence:"G2", tssaCertNumber:"TEST-000145", address:"48 Placeholder Rd, London, ON", credentials:[{name:"G2 Gas Technician", number:"TEST-000145", expires:at(41)},{name:"ODP", number:"", expires:""}]},
+    u_tech2:{name:"Sam Reyes", role:"technician", trade:"electrical", gasLicence:"G3", tssaCertNumber:"TEST-000167", address:"57 Example Ave, London, ON", credentials:[{name:"309A Electrician", number:"", expires:at(500)},{name:"G3 Gas Technician", number:"TEST-000167", expires:at(600)}]},
+    u_appr:{name:"Alex Kim", role:"apprentice", trade:"hvac", supervisorId:"u_super", gasLicence:"none", tssaCertNumber:"", address:"63 Sample St, London, ON", credentials:[]},
+    u_acct:{name:"Farah Haddad", role:"accountant", trade:"hvac", gasLicence:"none", tssaCertNumber:"", address:"71 Demo Cres, London, ON", credentials:[]},
   };
   for (const [id,u] of Object.entries(users)) await put("users", id, Object.assign({active:true}, u));
   const custs = {
@@ -2757,8 +3010,8 @@ async function seedPreview(){
   };
   for (const [id,c] of Object.entries(custs)) await put("customers", id, c);
   const eq = {
-    e1:{manufacturer:"Lennox", model:"ML196E", serial:"5F2201134", type:"Furnace", fuel:"Natural gas", input:"66,000 BTU/h", filterSize:"16x25x1", installDate:"2021-03-11", warrantyUntil:"2031-03-11", siteCustomerId:"c1", qrStatus:"not_active"},
-    e2:{manufacturer:"Carrier", model:"58TP", serial:"C9931-2087", type:"Furnace", fuel:"Natural gas", input:"80,000 BTU/h", filterSize:"20x25x4", installDate:"2012-11-02", siteCustomerId:"c3", qrStatus:"not_active", notes:"Basement mechanical room, unit B."},
+    e1:{manufacturer:"Lennox", model:"ML196E", serial:"5F2201134", type:"Furnace", fuel:"Natural gas", inputBtuh:66000, filterSize:"16x25x1", installDate:"2021-03-11", warrantyUntil:"2031-03-11", siteCustomerId:"c1", qrStatus:"not_active"},
+    e2:{manufacturer:"Carrier", model:"58TP", serial:"C9931-2087", type:"Furnace", fuel:"Natural gas", inputBtuh:80000, filterSize:"20x25x4", installDate:"2012-11-02", siteCustomerId:"c3", qrStatus:"not_active", notes:"Basement mechanical room, unit B."},
     e3:{manufacturer:"Square D", model:"QO130M200PC", serial:"SD-778213", type:"Electrical panel", fuel:"Electric", installDate:"2022-06-20", siteCustomerId:"c2", qrStatus:"not_active"},
     e4:{manufacturer:"Goodman", model:"GSZB4", serial:"GZ-2304551", type:"Heat pump", fuel:"Electric", refrigerant:"R-454B", installDate:"2024-05-14", warrantyUntil:"2034-05-14", siteCustomerId:"c4", qrStatus:"not_active"},
   };
