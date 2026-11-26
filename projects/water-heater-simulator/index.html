@@ -338,6 +338,8 @@ function resetNormal(){Object.assign(S,{T:Array(NL).fill(140),set:140,gas:true,k
 function coldStart(){resetNormal();S.T=Array(NL).fill(50);S.gas=false;S.knob='OFF';S.pilot=false;S.tc=0;startPurge();}
 const PURGE=15; // real seconds shown as 5:00 → 0:00, independent of time speed
 function startPurge(){S.purge=PURGE;}
+const valveOff=()=>S.knob==='OFF'||!S.gas; // purge only counts while gas to the pilot is shut
+function purgeTick(sec){if(valveOff())S.purge=Math.max(0,S.purge-sec);} // paused (not reset) while knob is PILOT/ON
 resetNormal();
 
 const thermoT=()=>S.T[1];
@@ -427,7 +429,8 @@ function operateHTML(){
   <label class="sw">Appliance gas shut-off <button class="btn ${S.gas?'g':'r'}" id="gas">${S.gas?'OPEN':'CLOSED'}</button></label>
   <label class="sw">Gas valve knob <span class="row" style="margin:0">${['OFF','PILOT','ON'].map(k=>`<button class="btn ${S.knob===k?'p':''}" data-k="${k}">${k}</button>`).join('')}</span></label>
   <div id="purge" style="display:none;text-align:center;background:#0d1218;border-radius:8px;padding:8px;margin:6px 0"><div style="font-size:12px;color:#8a9bb0">Purge wait before lighting</div><div id="pclock" style="font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1">5:00</div>
-   <div class="ref">In real life: wait 5 full minutes with the gas valve OFF — to let unburned gas clear (G2 p.18-17).</div><div class="ar">بالحقيقة لازم تنتظر 5 دقايق كاملة والصمام مسكّر حتى يطلع الغاز.</div></div>
+   <div class="ref">In real life: wait 5 full minutes with the gas valve OFF — to let unburned gas clear (G2 p.18-17).</div><div class="ar">بالحقيقة لازم تنتظر 5 دقايق كاملة والصمام مسكّر حتى يطلع الغاز.</div>
+   <div id="pwarn" class="warnbox" style="display:none">PAUSED — Turn the gas valve knob to OFF — the 5 minutes only count with the valve OFF.<div class="ar">لف المقبض على OFF — الخمس دقايق ما تنحسب إلا والصمام مسكّر.</div></div></div>
   <button class="btn p" id="light" style="width:100%;padding:13px">HOLD: depress knob + piezo spark</button>
   <div style="height:8px;background:#232d3a;border-radius:4px;margin:6px 0"><div id="tcbar" style="height:8px;width:${S.tc*100}%;background:${S.tc>.6?'#5fd38a':'#ffc24b'};border-radius:4px"></div></div>
   <div class="ref" id="tctext">${tcText()}</div>
@@ -447,6 +450,7 @@ function liveOperate(){ // refreshed every frame from the loop (no rebuild of th
   pb.style.display=S.pilot?'none':'';
   const sec=Math.ceil(S.purge/PURGE*300),txt=Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
   const pc=panel.querySelector('#pclock');if(pc.textContent!==txt){pc.textContent=txt;pc.style.color=sec>0?'#ffc24b':'#5fd38a';}
+  const pw=panel.querySelector('#pwarn'),pz=S.purge>0&&!valveOff();if(pw&&pw.style.display!==(pz?'':'none'))pw.style.display=pz?'':'none';
   const L=panel.querySelector('#light');if(L)L.style.opacity=S.purge>0?'.45':'';
   const tt=panel.querySelector('#tctext');if(tt&&tt.textContent!==tcText())tt.textContent=tcText();
   const m=panel.querySelector('#msg');if(m&&m.textContent!==S.msg){m.textContent=S.msg;m.style.display=S.msg?'':'none';}
@@ -489,38 +493,40 @@ function diagnoseHTML(){
   return h;
 }
 function render(){
-  S.holding=false;holdPid=null; // the hold button is about to be rebuilt: never leave a hold stuck
+  S.holding=false;holdPid=null;holdKey=false; // the hold button is about to be rebuilt: never leave a hold stuck
   if(mode==='learn')panel.innerHTML=learnHTML();
   else if(mode==='operate')panel.innerHTML=operateHTML();
   else if(mode==='diagnose')panel.innerHTML=diagnoseHTML();
   else panel.innerHTML=CODE_HTML;
   wire();if(mode==='operate')liveOperate();
 }
-let holdPid=null;
+let holdPid=null,holdKey=false;
 function release(e){if(!S.holding)return;if(e&&e.pointerId!=null&&holdPid!=null&&e.pointerId!==holdPid)return;
-  S.holding=false;holdPid=null;
-  setTimeout(()=>setMsg(S.pilot?'Pilot stayed lit. Now turn the knob to ON.':'Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault. Wait out the 5 min again.'),60);}
+  // decide now (same rule step() applies next frame), not from S.pilot later
+  const holds=S.pilot&&safetyHeld()&&S.gas&&S.knob==='PILOT';
+  S.holding=false;holdPid=null;holdKey=false;
+  setMsg(holds?'Pilot stayed lit. Now turn the knob to ON.':'Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault. Turn the knob OFF and wait out the 5 min again.');}
 addEventListener('pointerup',release);addEventListener('pointercancel',release);addEventListener('blur',()=>release());
-addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter')release();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+addEventListener('keyup',e=>{if(holdKey&&(e.key===' '||e.key==='Enter'))release();});
 function wire(){
   const q=s=>panel.querySelector(s),qa=s=>panel.querySelectorAll(s);
   qa('[data-p]').forEach(b=>b.onclick=()=>selectPart(b.dataset.p));
   if(q('#back'))q('#back').onclick=()=>selectPart(null);
   if(q('#tour'))q('#tour').onclick=()=>{const k=Object.keys(PARTS);selectPart(k[(k.indexOf(sel)+1)%k.length]);};
   if(q('#cut'))q('#cut').onclick=()=>{cutOn=!cutOn;clipMats.forEach(m=>{m.clippingPlanes=cutOn?clips:[];m.needsUpdate=true;});render();};
-  if(q('#gas'))q('#gas').onclick=()=>{S.gas=!S.gas;if(!S.gas){S.pilot=false;startPurge();}render();};
+  if(q('#gas'))q('#gas').onclick=()=>{S.gas=!S.gas;if(!S.gas&&S.pilot){S.pilot=false;startPurge();}render();};
   qa('[data-k]').forEach(b=>b.onclick=()=>{const k=b.dataset.k;
-    if(k==='OFF'&&S.knob!=='OFF'){startPurge();S.pilot=false;}
-    if(k==='PILOT'&&S.knob==='ON'&&!S.pilot)startPurge();
+    if(k==='OFF'&&S.pilot){startPurge();S.pilot=false;} // pilot out → full 5 min; otherwise the paused countdown just resumes
     if(k==='ON'&&!S.pilot)S.msg='Knob is ON but pilot is out — no gas will flow to the burner.';else S.msg='';
     S.knob=k;render();});
   const L=q('#light');
   if(L){const down=e=>{e.preventDefault();if(S.holding)return;
+      if(S.purge>0){setMsg(valveOff()?'Not yet — gas may still be in the chamber.':'Turn the gas valve knob to OFF — the 5 minutes only count with the valve OFF.');return;}
       if(!S.gas){setMsg('Open the appliance gas shut-off first.');return;}
       if(S.knob!=='PILOT'){setMsg('Turn the knob to PILOT first, then depress it.');return;}
-      if(S.purge>0){setMsg('Not yet — gas may still be in the chamber.');return;}
       if(S.f.fvir){setMsg('Spark, but no pilot — gas is cut (FVIR thermal switch open).');return;}
-      if(e.pointerId!=null){holdPid=e.pointerId;try{L.setPointerCapture(e.pointerId);}catch(_){}}
+      holdKey=e.pointerId==null;if(!holdKey){holdPid=e.pointerId;try{L.setPointerCapture(e.pointerId);}catch(_){}}
       S.holding=true;setMsg('Holding knob down… keep holding until thermocouple is hot.');};
     L.addEventListener('pointerdown',down);L.addEventListener('lostpointercapture',release);L.oncontextmenu=e=>e.preventDefault();
     L.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();if(!e.repeat)down(e);}});}
@@ -529,7 +535,7 @@ function wire(){
   if(q('#tap'))q('#tap').onclick=()=>{S.tap=!S.tap;render();};
   if(q('#inlet'))q('#inlet').onclick=()=>{S.inlet=!S.inlet;render();};
   qa('[data-s]').forEach(b=>b.onclick=()=>{S.speed=+b.dataset.s;render();});
-  if(q('#cold'))q('#cold').onclick=()=>{coldStart();S.msg='New install: tank full of cold water. Open gas, knob to PILOT, wait out the 5 min (countdown below), then light.';render();};
+  if(q('#cold'))q('#cold').onclick=()=>{coldStart();S.msg='New install: tank full of cold water. Open the gas shut-off but leave the knob OFF while the 5 min counts down (below). Then turn the knob to PILOT and light.';render();};
   if(q('#norm'))q('#norm').onclick=()=>{resetNormal();render();};
   if(q('#new'))q('#new').onclick=startScenario;
   if(q('#quit'))q('#quit').onclick=()=>{endScenario();render();};
@@ -561,9 +567,11 @@ canvas.addEventListener('pointerup',e=>{const d0=downs.get(e.pointerId);downs.de
   const inCut=h=>cutOn&&h.object.material.clippingPlanes&&h.object.material.clippingPlanes.length&&h.point.x<0&&h.point.z>0;
   const all=ray.intersectObjects(pickables.filter(m=>m.visible),false),hits=all.filter(h=>!inCut(h));
   if(!hits.length)return;
-  // prefer a non-shell part only if it is really visible: seen through the open cutaway, or right next to the nearest hit
-  const sh=h=>['tank','jacket'].includes(h.object.userData.part);let pick=hits[0];
-  if(sh(pick)){const n=hits.find(h=>!sh(h)&&(h.distance-hits[0].distance<.3||all.some(c=>inCut(c)&&c.distance<h.distance)));if(n)pick=n;}
+  // see through transparent water (part 'tank') but stop at the first opaque surface: nothing behind an opaque wall is picked
+  const sh=h=>['tank','jacket'].includes(h.object.userData.part),opq=h=>!(h.object.material.transparent&&h.object.material.opacity<1);
+  let pick=hits.find(opq)||hits[0];
+  // a fitting flush with / poking through a shell may tie with it: prefer it only if within .08 of the shell hit
+  if(sh(pick)&&opq(pick)){const n=hits.find(h=>!sh(h)&&h.distance>=pick.distance&&h.distance-pick.distance<.08);if(n)pick=n;}
   selectPart(pick.object.userData.part);});
 
 /* =========================================================
@@ -579,8 +587,8 @@ function resize(){const w=innerWidth,h=innerHeight;if(renderer)renderer.setSize(
 addEventListener('resize',resize);resize();
 let last=performance.now(),uiT=0,clock=0;
 function loop(now){
-  const rdt=Math.min(.1,(now-last)/1000);last=now;clock+=rdt;
-  S.purge=Math.max(0,S.purge-rdt); // purge wait runs in REAL time, not sim time
+  const el=Math.max(0,(now-last)/1000),rdt=Math.min(.1,el);last=now;clock+=rdt;
+  purgeTick(el); // purge wait runs on the wall clock (uncapped: time in a hidden tab with the valve OFF counts too)
   // thermocouple heats in real time
   if(S.pilot)S.tc=Math.min(1,S.tc+rdt/3);else S.tc=Math.max(0,S.tc-rdt/4);
   let sdt=rdt*S.speed;while(sdt>0){const d=Math.min(1,sdt);step(d);sdt-=d;}
