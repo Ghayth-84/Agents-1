@@ -208,9 +208,9 @@ const clips=[new THREE.Plane(new THREE.Vector3(1,0,0),0),new THREE.Plane(new THR
 let cutOn=true;
 const clipMats=[];
 const pickables=[];
-function mat(color,o={}){
+function mat(color,{clip,...o}={}){
   const m=new THREE.MeshStandardMaterial(Object.assign({color,roughness:.55,metalness:.25},o));
-  if(o.clip){delete m.clip;m.clippingPlanes=clips;m.clipIntersection=true;m.side=THREE.DoubleSide;clipMats.push(m);}
+  if(clip){m.clippingPlanes=clips;m.clipIntersection=true;m.side=THREE.DoubleSide;clipMats.push(m);}
   return m;
 }
 function add(geo,m,part,pos,rot){
@@ -425,13 +425,14 @@ function learnHTML(){
 }
 function operateHTML(){
   return `<h2>Operate it</h2><div class="warnbox" id="msg" style="display:${S.msg?'':'none'}">${S.msg}</div>
-  <h3>Sequence of operation (live)</h3>${seqHTML()}
-  <label class="sw">Appliance gas shut-off <button class="btn ${S.gas?'g':'r'}" id="gas">${S.gas?'OPEN':'CLOSED'}</button></label>
-  <label class="sw">Gas valve knob <span class="row" style="margin:0">${['OFF','PILOT','ON'].map(k=>`<button class="btn ${S.knob===k?'p':''}" data-k="${k}">${k}</button>`).join('')}</span></label>
   <div id="purge" style="display:none;text-align:center;background:#0d1218;border-radius:8px;padding:8px;margin:6px 0"><div style="font-size:12px;color:#8a9bb0">Purge wait before lighting</div><div id="pclock" style="font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1">5:00</div>
    <div class="ref">In real life: wait 5 full minutes with the gas valve OFF — to let unburned gas clear (G2 p.18-17).</div><div class="ar">بالحقيقة لازم تنتظر 5 دقايق كاملة والصمام مسكّر حتى يطلع الغاز.</div>
    <div id="pwarn" class="warnbox" style="display:none">PAUSED — Turn the gas valve knob to OFF — the 5 minutes only count with the valve OFF.<div class="ar">لف المقبض على OFF — الخمس دقايق ما تنحسب إلا والصمام مسكّر.</div></div></div>
+  <h3>Sequence of operation (live)</h3>${seqHTML()}
+  <label class="sw">Appliance gas shut-off <button class="btn ${S.gas?'g':'r'}" id="gas">${S.gas?'OPEN':'CLOSED'}</button></label>
+  <label class="sw">Gas valve knob <span class="row" style="margin:0">${['OFF','PILOT','ON'].map(k=>`<button class="btn ${S.knob===k?'p':''}" data-k="${k}">${k}</button>`).join('')}</span></label>
   <button class="btn p" id="light" style="width:100%;padding:13px">HOLD: depress knob + piezo spark</button>
+  <div class="ref" id="lmsg" style="color:#ffc24b;display:${S.msg?'':'none'}">${S.msg}</div>
   <div style="height:8px;background:#232d3a;border-radius:4px;margin:6px 0"><div id="tcbar" style="height:8px;width:${S.tc*100}%;background:${S.tc>.6?'#5fd38a':'#ffc24b'};border-radius:4px"></div></div>
   <div class="ref" id="tctext">${tcText()}</div>
   <label class="sw">Thermostat setpoint <b id="setv">${S.set}°F</b></label><input type="range" min="100" max="160" step="5" value="${S.set}" id="set">
@@ -453,7 +454,7 @@ function liveOperate(){ // refreshed every frame from the loop (no rebuild of th
   const pw=panel.querySelector('#pwarn'),pz=S.purge>0&&!valveOff();if(pw&&pw.style.display!==(pz?'':'none'))pw.style.display=pz?'':'none';
   const L=panel.querySelector('#light');if(L)L.style.opacity=S.purge>0?'.45':'';
   const tt=panel.querySelector('#tctext');if(tt&&tt.textContent!==tcText())tt.textContent=tcText();
-  const m=panel.querySelector('#msg');if(m&&m.textContent!==S.msg){m.textContent=S.msg;m.style.display=S.msg?'':'none';}
+  ['#msg','#lmsg'].forEach(id=>{const m=panel.querySelector(id);if(m&&m.textContent!==S.msg){m.textContent=S.msg;m.style.display=S.msg?'':'none';}}); // #lmsg mirrors #msg next to the HOLD button
 }
 /* ---------- Diagnose ---------- */
 const D={active:null,log:[],done:false,pick:null,score:0,count:0,correct:0};
@@ -492,23 +493,25 @@ function diagnoseHTML(){
    <button class="btn p" id="new" style="width:100%;padding:12px">Next service call</button> <button class="btn" id="quit" style="width:100%;margin-top:6px">Back to normal heater</button>`;}
   return h;
 }
+let shownMode=null;
 function render(){
-  S.holding=false;holdPid=null;holdKey=false; // the hold button is about to be rebuilt: never leave a hold stuck
+  release(); // the hold button is about to be rebuilt: end any hold properly (state + message agree)
   if(mode==='learn')panel.innerHTML=learnHTML();
   else if(mode==='operate')panel.innerHTML=operateHTML();
   else if(mode==='diagnose')panel.innerHTML=diagnoseHTML();
   else panel.innerHTML=CODE_HTML;
   wire();if(mode==='operate')liveOperate();
+  if(mode!==shownMode){shownMode=mode;panel.scrollTop=0;}
 }
 let holdPid=null,holdKey=false;
 function release(e){if(!S.holding)return;if(e&&e.pointerId!=null&&holdPid!=null&&e.pointerId!==holdPid)return;
   // decide now (same rule step() applies next frame), not from S.pilot later
   const holds=S.pilot&&safetyHeld()&&S.gas&&S.knob==='PILOT';
   S.holding=false;holdPid=null;holdKey=false;
-  if(holds)setMsg('Pilot stayed lit. Now turn the knob to ON.');
-  else if(S.pilot){S.pilot=false;startPurge(); // apply the outcome now so message and state always agree
-    setMsg('Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault. Turn the knob OFF and wait out the 5 min again.');}
-  else setMsg('Released too soon — the pilot never lit. Hold the knob down until the thermocouple is hot.');}
+  if(holds){setMsg('Pilot stayed lit. Now turn the knob to ON.');return;}
+  // any release before the thermocouple is hot (the pilot lights on the first frame of a hold, so this covers every short tap)
+  S.pilot=false;startPurge();
+  setMsg('Pilot did not stay lit when you released the knob — thermocouple not hot enough yet (or a safety fault such as an open ECO). Turn the knob OFF, wait out the 5 min again, then hold longer.');}
 addEventListener('pointerup',release);addEventListener('pointercancel',release);addEventListener('blur',()=>release());
 document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
 addEventListener('keyup',e=>{if(holdKey&&(e.key===' '||e.key==='Enter'))release();});
@@ -538,8 +541,8 @@ function wire(){
   if(q('#tap'))q('#tap').onclick=()=>{S.tap=!S.tap;render();};
   if(q('#inlet'))q('#inlet').onclick=()=>{S.inlet=!S.inlet;render();};
   qa('[data-s]').forEach(b=>b.onclick=()=>{S.speed=+b.dataset.s;render();});
-  if(q('#cold'))q('#cold').onclick=()=>{coldStart();S.msg='New install: tank full of cold water. Open the gas shut-off but leave the knob OFF while the 5 min counts down (below). Then turn the knob to PILOT and light.';render();};
-  if(q('#norm'))q('#norm').onclick=()=>{resetNormal();render();};
+  if(q('#cold'))q('#cold').onclick=()=>{coldStart();S.msg='New install: tank full of cold water. Open the gas shut-off but leave the knob OFF while the 5 min counts down (below). Then turn the knob to PILOT and light.';render();panel.scrollTop=0;};
+  if(q('#norm'))q('#norm').onclick=()=>{resetNormal();render();panel.scrollTop=0;};
   if(q('#new'))q('#new').onclick=startScenario;
   if(q('#quit'))q('#quit').onclick=()=>{endScenario();render();};
   qa('[data-t]').forEach(b=>b.onclick=()=>{const k=b.dataset.t;if(D.log.find(x=>x[0]===k))return;
@@ -582,11 +585,18 @@ canvas.addEventListener('pointerup',e=>{const d0=downs.get(e.pointerId);downs.de
    ========================================================= */
 function tcol(t){const k=Math.min(1,Math.max(0,(t-50)/(170-50)));return new THREE.Color().setHSL(.62*(1-k),.85,.5);}
 let fitted=false;
+const FIT_Y0=0,FIT_Y1=7.1,FIT_W=3.4; // heater bounds: floor → vent top, width
 function resize(){const w=innerWidth,h=innerHeight;if(renderer)renderer.setSize(w,h,false);camera.aspect=w/h;
-  camera.setViewOffset(w,h,0,h*.2,w,h);camera.updateProjectionMatrix();
-  if(!fitted){fitted=true;const a=Math.min(1.2,w/h);const dist=Math.max(11,11/Math.pow(a,.9));
-    const dir=new THREE.Vector3(-6.2,1.6,7.4).normalize();camera.position.copy(controls.target).add(dir.multiplyScalar(dist));
-    controls.maxDistance=dist*1.6;}}
+  // centre the view in the band between the top bar and the panel (panel max-height 46vh; resize() runs before the first render)
+  const top=document.getElementById('top').offsetHeight+6,bot=h*.54;
+  const band=Math.max(60,bot-top),yc=(top+bot)/2;
+  camera.setViewOffset(w,h,0,h/2-yc,w,h);camera.updateProjectionMatrix();
+  if(!fitted){fitted=true;const t2=2*Math.tan(camera.fov*Math.PI/360);
+    const dV=(FIT_Y1-FIT_Y0)*1.12*(h/band)/t2,dH=FIT_W*1.15/(t2*camera.aspect);
+    const dist=Math.max(dV,dH)+1.2;
+    controls.target.set(0,(FIT_Y0+FIT_Y1)/2,0);
+    const dir=new THREE.Vector3(-6.2,1.6,7.4).normalize();camera.position.copy(controls.target).addScaledVector(dir,dist);
+    controls.maxDistance=Math.max(16,dist*1.6);controls.update();}}
 addEventListener('resize',resize);resize();
 let last=performance.now(),uiT=0,clock=0;
 function loop(now){
