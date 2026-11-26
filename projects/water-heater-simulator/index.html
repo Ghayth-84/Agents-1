@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Water Heater Simulator – Conventional Vent (G2 Module 18)</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#141b24;color:#e8edf3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+#c{position:fixed;inset:0;display:block;touch-action:none}
+#top{position:fixed;top:0;left:0;right:0;display:flex;gap:4px;padding:6px;background:rgba(14,19,26,.92);z-index:5;overflow-x:auto}
+#top button{flex:1;min-width:70px;padding:9px 6px;border:0;border-radius:8px;background:#232d3a;color:#c9d4e0;font-weight:600;font-size:14px}
+#top button.on{background:#e8792b;color:#fff}
+#chips{position:fixed;top:52px;left:6px;right:6px;display:flex;flex-wrap:wrap;gap:4px;z-index:4;pointer-events:none}
+.chip{background:rgba(20,27,36,.85);border:1px solid #2c3746;border-radius:14px;padding:3px 9px;font-size:12px}
+.chip b{color:#fff}
+.chip.ok b{color:#5fd38a}.chip.bad b{color:#ff6b6b}.chip.warn b{color:#ffc24b}
+#panel{position:fixed;left:0;right:0;bottom:0;max-height:46vh;overflow-y:auto;background:rgba(16,22,30,.97);border-top:2px solid #e8792b;border-radius:14px 14px 0 0;padding:12px 14px 18px;z-index:5;font-size:14.5px;line-height:1.45}
+#panel h2{margin:0 0 6px;font-size:17px;color:#ffb27a}
+#panel h3{margin:12px 0 4px;font-size:15px;color:#9fd0ff}
+.ar{direction:rtl;text-align:right;background:#1f2a37;border-radius:8px;padding:6px 9px;margin:8px 0;font-size:15px;color:#ffe3a6}
+.ref{font-size:12px;color:#8a9bb0;margin-top:6px}
+.row{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.btn{padding:9px 12px;border:0;border-radius:8px;background:#2b3848;color:#e8edf3;font-size:14px;font-weight:600}
+.btn.p{background:#e8792b;color:#fff}.btn.g{background:#2f8f57}.btn.r{background:#b33a3a}
+.btn.sel{outline:2px solid #ffb27a}
+.btn:disabled{opacity:.4}
+ol.seq{padding-left:20px;margin:4px 0}ol.seq li{margin:3px 0;color:#8a9bb0}
+ol.seq li.now{color:#fff;font-weight:700}ol.seq li.done{color:#5fd38a}
+.log{background:#0d1218;border-radius:8px;padding:8px;margin-top:6px;font-size:13.5px}
+.log div{margin:4px 0;border-bottom:1px solid #1f2a37;padding-bottom:4px}
+.warnbox{background:#3a2a10;border-left:4px solid #ffc24b;padding:7px 9px;border-radius:6px;margin:6px 0}
+.goodbox{background:#123222;border-left:4px solid #5fd38a;padding:7px 9px;border-radius:6px;margin:6px 0}
+.badbox{background:#3a1515;border-left:4px solid #ff6b6b;padding:7px 9px;border-radius:6px;margin:6px 0}
+input[type=range]{width:100%}
+label.sw{display:flex;align-items:center;justify-content:space-between;background:#1f2a37;padding:8px 10px;border-radius:8px;margin:5px 0}
+#hint{position:fixed;right:8px;bottom:47vh;font-size:11px;color:#8a9bb0;z-index:4;pointer-events:none;text-align:right}
+#err{display:none;position:fixed;inset:30% 10% auto;background:#3a1515;padding:14px;border-radius:10px;z-index:9}
+ul{margin:4px 0;padding-left:20px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="top">
+  <button data-m="learn" class="on">Learn</button>
+  <button data-m="operate">Operate</button>
+  <button data-m="diagnose">Diagnose</button>
+  <button data-m="code">Code</button>
+</div>
+<div id="chips"></div>
+<div id="hint">Drag = rotate · pinch = zoom · tap a part</div>
+<div id="panel"></div>
+<div id="err">3-D could not load on this device. Try reopening the page.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+if(!window.THREE){document.getElementById('err').style.display='block';return;}
+
+/* =========================================================
+   BOOK CONTENT  (G2 Module 18 – Water Heaters & Combo Heating)
+   ========================================================= */
+const PARTS={
+ tank:{n:"Steel tank (glass-lined)",ar:"التانكي حديد ومبطّن زجاج من جوة حتى ما يزنجر. هو نفسه المبادل الحراري.",
+  t:"Welded pressure vessel rated for a working pressure of 150 psi (1035 kPa). The inner wall is often 'glass-lined' (enamel) against corrosion. The tank IS the heat exchanger: the base above the burner is the primary surface, the centre flue walls are the secondary surface. Minerals drop out of hot water and settle on the bottom, insulating it.",r:"Module 18, p.18-8"},
+ jacket:{n:"Jacket & insulation",ar:"الغلاف الخارجي والعازل يقللون ضياع الحرارة.",
+  t:"The steel tank is wrapped in insulation covered by a sheet-metal casing. Conventional vent heaters are usually only 60–75% efficient: atmospheric burner, constant pilot, and off-cycle losses as warm air keeps rising up the vent.",r:"p.18-8, 18-9"},
+ flue:{n:"Centre flue",ar:"البوري اللي بنص التانكي، منه يطلع الدخان لفوك ويسخّن الماي من الجوانب.",
+  t:"Flue gases rise vertically through the centre flue inside the water. Flue gas leaving a conventional heater is 400–700°F (205–370°C) depending on heat-exchanger condition and water temperature.",r:"p.18-7, 18-9"},
+ baffle:{n:"Baffle (turbulator)",ar:"الشريط الملوّي يبطّئ الدخان حتى يلحك يعطي حرارته للماي.",
+  t:"Inserted in the centre flue to slow the flue gases and make them scrub the flue walls, improving heat transfer. Heat stains with no spillage → pull the baffle and check for soot.",r:"p.18-8, 18-87"},
+ burner:{n:"Main burner",ar:"الشعلة الرئيسية لازم تكون زرگة ومنتظمة. إذا برتقالية = وساخة.",
+  t:"Atmospheric burner with fixed air shutter. Smaller inputs use a ring burner; over 100,000 Btuh usually 3+ ribbon burners. Air is drawn in at the base, so dust burns on it (carbon), rust falls from the flue and condensation can drip on it. Flame must be blue and even at all ports; orange/black spots = clean burner and chamber.",r:"p.18-16"},
+ pilot:{n:"Pilot & thermocouple",ar:"البايلوت يسخّن الثيرموكبل، والثيرموكبل يمسك صمام الأمان مفتوح. إذا طفى البايلوت ينسد الغاز.",
+  t:"Constant pilot heats a thermocouple (or thermopile) that holds the primary SAFETY valve open while a pilot flame exists. Lighting: follow the label exactly – wait 5 minutes with the gas valve OFF, and put the flame at the pilot outlet BEFORE depressing the knob. Sealed (FVIR) heaters use a piezo igniter: one spark per press.",r:"p.18-17, 18-21"},
+ gasvalve:{n:"Combination gas valve (Unitrol)",ar:"صمام الغاز المركّب: سكّة يدوية + منظّم ضغط + صمام أمان + ثيرموستات + ECO، كلها بقطعة وحدة وبدون كهرباء.",
+  t:"Combines: manual shut-off · main burner regulator (some models) · safety valve fed by the pilot · thermostat + main gas valve (mechanical, or millivolt solenoid on newer) · high-limit ECO · on newer valves a piezo and diagnostic LED. Max inlet usually 14\" w.c.; outlet per rating plate (usually 3.5\" w.c., not always). Many valves (White Rodgers, Honeywell) have no pressure adjustment – wrong pressure means replace the valve. Robertshaw Unitrol: clockwise raises pressure.",r:"p.18-18 to 18-21"},
+ probe:{n:"Thermostat (rod & tube) + ECO",ar:"الراد يتمدد ويه الحرارة ويسكّر الغاز. فرق التشغيل حوالي 20 فهرنهايت. الـ ECO يقطع على 195.",
+  t:"Rod-and-tube sensor in the water (plastic sleeve against corrosion). Snap action makes the valve fully open or fully closed. Differential between shut-off and restart is usually 20°F (11°C). The ECO (energy cut-off) shuts the burner if water reaches an unsafe temperature, usually 195°F (91°C); on constant-pilot systems it is wired in SERIES with the thermocouple. If built into the rod-and-tube thermostat it is single-use → replace the gas valve.",r:"p.18-19, 18-20, 18-22"},
+ dip:{n:"Dip tube",ar:"أنبوب بلاستك ينزّل الماي البارد لجوة التانكي، قرب الثيرموستات، وما يخليه يطلع ويه الحار.",
+  t:"Directs incoming cold water to the bottom (near the thermostat) for a prompt burner cycle and pushes hot water out the top. Often has an anti-siphon hole in the top 6\" and jets at the bottom. If it breaks: cold water goes straight out the hot outlet – tank hot, burner may not come on, but no hot water at taps. Never heat the cold inlet with a torch at the tank – solder off the tank first.",r:"p.18-13, 18-14"},
+ anode:{n:"Sacrificial anode",ar:"قضيب المغنيسيوم يتآكل بدل التانكي. ريحة بيض خايس بالماي الحار = تفاعل الأنود.",
+  t:"Magnesium rod gives up electrons more easily than steel, protecting the tank. Inspect every 1–3 years; replace before 75% loss. Lime coating stops it working. Rotten-egg smell needs 4 factors (sulfate, low oxygen, sulfate-reducing bacteria, active hydrogen from the anode) – fix with a less active anode + chlorinating tank and lines. Powered anodes must always be powered.",r:"p.18-11, 18-12"},
+ tp:{n:"T&P relief valve",ar:"صمام الأمان: يفتح على 210 فهرنهايت أو 150 psi. جرّب العتلة كل سنة. لا تسدّه أبداً.",
+  t:"Rod-and-tube temperature element plus spring pressure valve: opens above 210°F or 150 psig. Operate the lever at least once a year; if no water flows, replace immediately. Remove and inspect every 3 years. Discharge causes: thermal expansion, supply over 75 psi, setting too high, stacking. A plugged T&P + failed controls → tank rupture, water flashes to steam (1,700× expansion).",r:"p.18-14, 18-15"},
+ discharge:{n:"T&P discharge pipe",ar:"بوري التصريف نفس قياس مخرج الصمام، بدون سنّ وبدون صمام، ونهايته قريبة من الگاع.",
+  t:"Same size as the valve outlet; ends within 12\" (300 mm) of the floor with the outlet visible; no valves and no threads on the end (so nobody caps it). Never connect it directly to a drain. NEVER PLUG A DRIPPING RELIEF VALVE.",r:"p.18-14, 18-86, 18-91 · B149.1 Cl. 7.27.2"},
+ drain:{n:"Drain valve",ar:"حنفية التصريف للغسيل. المصنّع يوصي تغسل التانكي كل 6 أشهر.",
+  t:"Used for flushing, cleaning or draining. Most manufacturers recommend flushing every six months; rarely done, so lime bakes on the bottom. A long-unused drain may clog with sediment. Popping/gurgling = lime build-up → flush (chemical flush per manufacturer: ADD ACID TO WATER).",r:"p.18-10, 18-85"},
+ drafthood:{n:"Draft hood",ar:"غطاء السحب: إذا انسد الفنت، الدخان يطلع للغرفة بدل ما يخنق الشعلة.",
+  t:"Four functions: (1) lets flue gas spill into the room if the vent is blocked or slow to start – safer than smothering the flame / roll-out; (2) baffle stops a backdraft entering the combustion chamber; (3) neutralizes stack action; (4) lets room air keep the vent warm in the off-cycle. Above the draft hood should be 250–350°F. Heat damage or corrosion here = spillage has happened → smoke test. A spill switch may shut the burner (wired with the thermocouple or safety circuit).",r:"p.18-9"},
+ vent:{n:"Vent connector",ar:"بوري الفنت لازم بنفس قطر الدرافت هود، و3 براغي، وميلان صحيح.",
+  t:"Vent pipe size should match the draft-hood diameter; secure to the draft hood with 3 screws. Back-pitched connectors, quick turns at the draft hood, or storing things on top of the heater cause poor venting. Water heaters usually have the weakest venting action in the house.",r:"p.18-9, 18-88"},
+ cold:{n:"Cold inlet & shut-off valve",ar:"لازم سكّة على الماي البارد حسب كود السباكة.",
+  t:"The cold-water inlet must have a shut-off valve (Plumbing Code) to isolate the heater for service. Residential heaters are usually 3/4\" connections. A G2 may connect/disconnect water piping essential to the appliance only, not other plumbing (O. Reg. 215/01).",r:"p.18-13, 18-64, 18-77"},
+ hot:{n:"Hot outlet – dielectric nipple & heat trap",ar:"النبل العازل يمنع التآكل الكهربائي، والهيت تراب يمنع الحرارة تهرب للبوري.",
+  t:"Dielectric nipples electrically separate the steel tank from the piping. Heat traps stop convective heat loss into the piping but restrict flow and can stick closed from lime – check with the manufacturer before removing.",r:"p.18-12"},
+ gaspipe:{n:"Gas supply, shut-off & drip leg",ar:"خط الغاز ويه سكّة يدوية وبوري الترسبات (dripleg).",
+  t:"Appliance manual shut-off and dripleg on the drop to the gas valve (shown on the cutaway diagram). Inlet pressure to the valve is normally max 14\" w.c.",r:"p.18-7, 18-20"},
+ arrestor:{n:"FVIR flame arrestor, air screen & thermal switch",ar:"نظام FVIR: يمنع اشتعال الأبخرة تطلع برّة. إذا انسدت الشبكة بالغبار، المفتاح الحراري يقطع الغاز.",
+  t:"Flammable Vapour Ignition Resistant (2007–2010 on): air enters only through a flame arrestor under the burner; sealed burner door; thermal cut-off in the chamber shuts pilot and burner on excessive heat (vapour fire, flame roll from a lint-clogged screen, or venting problem). After a vapour event most makers say replace the heater. Clean the air screen regularly.",r:"p.18-24, 18-25"}
+};
+
+const CODE_HTML=`
+<h2>Ontario code points in Module 18</h2>
+<div class="warnbox">Clause numbers below are as printed in your G2 book (B149.1 with Ontario amendments). Editions get renumbered — confirm against the code book your exam/TSSA uses.</div>
+<h3>Cl. 7.27.1 – Location</h3>
+<ul><li>Only a <b>direct-vent</b> water heater in a bathroom, bedroom, or enclosure with sleeping accommodation.</li>
+<li>Ontario amendment: a <b>power-vent</b> heater may go in an enclosure next to a bathroom/bedroom if adequate air supply (Cl. 8.2.6).</li>
+<li>Ontario amendment: a natural-draft heater may be in an enclosure reached by a door from a bathroom/bedroom only if the enclosure volume ≥ that room.</li>
+<li>A room with only a toilet and sink is not a "bathroom" by definition.</li></ul>
+<h3>Cl. 7.27.2 – Relief valve discharge</h3>
+<ul><li>Pipe at least the size of the device outlet.</li><li>Terminates within 12" (300 mm) of the floor, outlet visible, no threads, no valve, not piped direct to a drain.</li></ul>
+<h3>Cl. 7.27.4 – Clearance (if not on rating plate)</h3>
+<ul><li>Storage type: 2" (50 mm) to combustibles. Other types: 6" (150 mm).</li></ul>
+<h3>Cl. 7.27.8 – Ontario amendment</h3>
+<ul><li>Storage heater level, on a firm stable base that holds it full. Wall-hung: secured for filled weight.</li></ul>
+<h3>Cl. 8.2.3 – Air supply</h3>
+<ul><li>No outdoor air needed for a single heater ≤ 50,000 Btuh in an enclosure with no other indoor-air appliance — but a non-direct-vent unit still needs the Cl. 8.2.6 permanent openings.</li></ul>
+<h3>Safety numbers to know</h3>
+<ul><li>T&P: 210°F / 150 psi · test lever yearly · inspect every 3 yrs</li><li>ECO: usually 195°F</li><li>Tank 140°F (kills Legionella) + certified mixing valve ≤120°F at taps</li><li>Thermostat differential ≈ 20°F</li><li>Wait 5 min with valve OFF before relighting</li><li>Above draft hood 250–350°F; flue 400–700°F</li><li>Anode: inspect 1–3 yrs, replace before 75% loss</li><li>Flush tank every 6 months</li></ul>
+<div class="ref">Source: G2 Module 18, pp.18-89 to 18-93, 18-14, 18-19 to 18-23</div>`;
+
+/* Diagnose scenarios */
+const TESTS={
+ pilot:"Look at pilot through viewing port",
+ relight:"Relight per lighting label, release knob",
+ mv:"Thermocouple millivolt test",
+ eco:"ECO continuity (ohms: pilot tube → magnet opening)",
+ temp:"Water temperature at nearest tap",
+ inlet:"Check cold water inlet shut-off",
+ draw:"Run hot water 10 min, watch outlet temp",
+ tp:"Inspect T&P discharge + measure supply pressure",
+ listen:"Listen while burner fires / flush at drain",
+ smell:"Smell the hot water",
+ smoke:"Smoke test at draft hood (burner firing)",
+ screen:"Inspect FVIR air screen & thermal switch"
+};
+const DEF={
+ pilot:"Pilot lit — steady blue flame on the thermocouple.",
+ relight:"Not needed — pilot already lit.",
+ mv:"Within manufacturer's spec.",
+ eco:"Continuity — ECO is closed (OK).",
+ temp:"About 120°F — normal.",
+ inlet:"Valve open.",
+ draw:"Temperature holds a while, then slowly drops; burner comes on.",
+ tp:"Discharge pipe dry. Supply pressure normal (under 75 psi).",
+ listen:"Quiet burner. Drain water runs clear.",
+ smell:"No odour.",
+ smoke:"Smoke is drawn into the draft hood — venting OK.",
+ screen:"Screen clean. Thermal switch closed."
+};
+const SC=[
+ {id:"tc",c:"\"No hot water since yesterday. I see the pilot is out.\"",
+  r:{pilot:"Pilot is OUT.",relight:"Pilot lights while you hold the knob, but goes out when you release it — even after holding 60 s.",mv:"Output is BELOW the manufacturer's minimum.",temp:"Lukewarm, about 70°F.",draw:"Cold right away. Burner never starts."},
+  dx:"Faulty thermocouple",fix:"Replace the thermocouple, relight exactly per the label (wait 5 min, flame at pilot before depressing knob), then re-check millivolts. Book: pilot outage → relight + millivolt test, replace thermocouple as needed.",ref:"p.18-17, 18-85"},
+ {id:"eco",c:"\"No hot water. Last week the water was scalding hot.\"",
+  r:{pilot:"Pilot is OUT.",relight:"Pilot lights while holding the knob, goes out when released.",mv:"New thermocouple tested on its own: within spec.",eco:"NO continuity — the ECO is OPEN.",temp:"Lukewarm, cooling down.",draw:"Cold. Burner never starts."},
+  dx:"Single-use ECO tripped (defective thermostat)",fix:"ECO is built into the rod-and-tube thermostat: replace the gas valve. Find WHY it overheated (thermostat failed / setting / manifold pressure too high). Book test: disconnect thermocouple, ohmmeter from pilot tube to the top-centre of the magnet opening.",ref:"p.18-22, 18-85"},
+ {id:"dip",c:"\"The tank is hot to touch but the shower goes lukewarm almost right away.\"",
+  r:{temp:"Starts lukewarm, about 95°F.",draw:"Outlet drops to near cold in a few minutes. Burner barely comes on even though water is running.",listen:"Small white plastic pieces come out at the drain."},
+  dx:"Broken dip tube",fix:"Replace the dip tube. Cold water is entering the top and leaving straight out the hot outlet, so the thermostat near the bottom never sees it. Breakage often comes from rough installation.",ref:"p.18-13, 18-85"},
+ {id:"tp",c:"\"Sometimes there's a puddle under the pipe on the side of the tank.\"",
+  r:{tp:"Discharge pipe is wet with mineral marks. Supply pressure measures 85 psi (over 75 psi).",temp:"About 125°F — normal."},
+  dx:"T&P relief valve discharging (excess supply pressure)",fix:"Replace the relief valve AND find the cause (here: supply over 75 psi — plumbing side, e.g. pressure-reducing valve / expansion tank by a licensed plumber). NEVER plug a dripping relief valve.",ref:"p.18-14, 18-86"},
+ {id:"sed",c:"\"It pops and rumbles when it heats, and takes forever to get hot again.\"",
+  r:{listen:"Popping and gurgling while firing. Drain water comes out milky with white/grey flakes.",draw:"Recovery is slow — burner runs a long time.",temp:"About 115°F."},
+  dx:"Lime / mineral build-up on tank bottom",fix:"Flush the tank per the manufacturer (chemical flush if needed — ADD ACID TO WATER, never the reverse). Recommend a water softener if water is hard. Lime insulates the hottest surface and wastes gas.",ref:"p.18-8, 18-10, 18-85"},
+ {id:"spill",c:"\"I smell fumes near the water heater and the top looks burnt.\"",
+  r:{smoke:"Smoke is pushed OUT of the draft hood — flue gases are SPILLING.",pilot:"Pilot lit but flame lazy.",temp:"About 120°F."},
+  dx:"Flue gas spillage – restricted vent / backdraft",fix:"Safety problem: shut down until fixed. Inspect vent connector and chimney (size, slope, blockage), check for building depressurization (exhaust fans, common-vented fan-assist furnace). Heat/corrosion at draft hood = spillage has occurred.",ref:"p.18-9, 18-86, 18-87"},
+ {id:"anode",c:"\"Our hot water smells like rotten eggs. The cold is fine.\"",
+  r:{smell:"Hot water has a strong sulphur (rotten egg) smell.",temp:"About 120°F."},
+  dx:"Anode reacting with sulfate / bacteria",fix:"Replace the anode with one of a less active material, then chlorinate the tank and all water lines. Customer may consider a water softener.",ref:"p.18-12, 18-86"},
+ {id:"hot",c:"\"The water is way too hot. My kid almost got burned at the sink.\"",
+  r:{temp:"155°F at the nearest tap! (3rd-degree burns in about 1 second at this temperature range).",draw:"Very hot, no mixing valve on the outlet."},
+  dx:"Thermostat set too high (no mixing valve)",fix:"Keep tank about 140°F (kills Legionella) and install a certified mixing valve set no higher than 120°F; confirm by measuring at the closest tap. Watch for stacking from short draws. If the thermostat itself is defective, the gas valve is replaced.",ref:"p.18-20, 18-23, 18-85"},
+ {id:"fvir",c:"\"Pilot keeps going out. It's in the laundry room by the dryer.\"",
+  r:{pilot:"Pilot is OUT.",relight:"Pilot will not stay lit — gas is cut at the thermal switch.",screen:"Air intake screen is CLOGGED with lint. Thermal cut-off switch is OPEN.",mv:"Within spec.",temp:"Cold."},
+  dx:"FVIR thermal cut-off tripped (clogged air screen)",fix:"Clean the air intake screen, correct the cause, then reset/replace the thermal switch per manufacturer. If it was a flammable-vapour event, most makers say replace the heater.",ref:"p.18-24, 18-25"},
+ {id:"inlet",c:"\"No hot water after the plumber was here this morning.\"",
+  r:{inlet:"Cold water inlet valve is CLOSED.",draw:"Almost no flow at the hot tap.",temp:"No flow at the tap."},
+  dx:"Cold water inlet valve closed",fix:"Open the cold inlet shut-off. Before any gas work: the tank must be full of water.",ref:"p.18-85, 18-59"}
+];
+const DXLIST=SC.map(s=>s.dx);
+
+/* =========================================================
+   3-D SCENE
+   ========================================================= */
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(2,window.devicePixelRatio));
+renderer.localClippingEnabled=true;
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x1b2430);
+const camera=new THREE.PerspectiveCamera(42,1,0.1,100);
+camera.position.set(-6.2,4.4,7.4);
+const controls=new THREE.OrbitControls(camera,canvas);
+controls.target.set(0,3.0,0);controls.enableDamping=true;controls.minDistance=3;controls.maxDistance=16;controls.maxPolarAngle=Math.PI*0.52;
+scene.add(new THREE.HemisphereLight(0xdde8ff,0x2a2018,0.9));
+const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(-4,8,6);scene.add(dl);
+
+// quarter cutaway: hide region x<0 & z>0
+const clips=[new THREE.Plane(new THREE.Vector3(1,0,0),0),new THREE.Plane(new THREE.Vector3(0,0,-1),0)];
+let cutOn=true;
+const clipMats=[];
+const pickables=[];
+function mat(color,o={}){
+  const m=new THREE.MeshStandardMaterial(Object.assign({color,roughness:.55,metalness:.25},o));
+  if(o.clip){delete m.clip;m.clippingPlanes=clips;m.clipIntersection=true;m.side=THREE.DoubleSide;clipMats.push(m);}
+  return m;
+}
+function add(geo,m,part,pos,rot){
+  const mesh=new THREE.Mesh(geo,m);
+  if(pos)mesh.position.set(pos[0],pos[1],pos[2]);
+  if(rot)mesh.rotation.set(rot[0]||0,rot[1]||0,rot[2]||0);
+  if(part){mesh.userData.part=part;pickables.push(mesh);}
+  scene.add(mesh);return mesh;
+}
+function cyl(a,b,r,color,part,m){
+  const A=new THREE.Vector3(...a),B=new THREE.Vector3(...b);
+  const len=A.distanceTo(B);
+  const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,14),m||mat(color));
+  mesh.position.copy(A).add(B).multiplyScalar(.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),B.clone().sub(A).normalize());
+  if(part){mesh.userData.part=part;pickables.push(mesh);}
+  scene.add(mesh);return mesh;
+}
+
+// floor
+const floor=new THREE.Mesh(new THREE.CircleGeometry(7,48),new THREE.MeshStandardMaterial({color:0x3a3f45,roughness:1}));
+floor.rotation.x=-Math.PI/2;scene.add(floor);
+const grid=new THREE.GridHelper(14,14,0x556070,0x404850);grid.position.y=.002;scene.add(grid);
+
+const TB=0.6,TT=4.75,TR=0.86; // tank bottom/top, radius
+// jacket + insulation + tank shells (clipped)
+add(new THREE.CylinderGeometry(1.0,1.0,4.9,40,1,true),mat(0xd9dde2,{clip:true,metalness:.1}),'jacket',[0,2.45,0]);
+add(new THREE.CircleGeometry(1.0,40),mat(0xd9dde2,{clip:true}),'jacket',[0,4.9,0],[-Math.PI/2,0,0]);
+add(new THREE.CylinderGeometry(.95,.95,TT-TB,40,1,true),mat(0xf0c64a,{clip:true,roughness:.95,metalness:0}),'jacket',[0,(TT+TB)/2,0]);
+add(new THREE.CylinderGeometry(TR,TR,TT-TB,40,1,true),mat(0x6b7480,{clip:true,metalness:.6}),'tank',[0,(TT+TB)/2,0]);
+add(new THREE.CircleGeometry(TR,40),mat(0x6b7480,{clip:true,metalness:.6}),'tank',[0,TT,0],[-Math.PI/2,0,0]);
+add(new THREE.CircleGeometry(TR,40),mat(0x5b636d,{clip:true,metalness:.6}),'tank',[0,TB,0],[Math.PI/2,0,0]);
+
+// water layers
+const NL=12,WB=TB+.02,WT=TT-.05,LH=(WT-WB)/NL;
+const layers=[];
+for(let i=0;i<NL;i++){
+  const m=mat(0x3377ff,{clip:true,transparent:true,opacity:.42,depthWrite:false,metalness:0,roughness:.3});
+  layers.push(add(new THREE.CylinderGeometry(TR-.03,TR-.03,LH*.96,40,1,true),m,'tank',[0,WB+LH*(i+.5),0]));
+}
+// sediment
+const sediment=add(new THREE.CylinderGeometry(.8,.8,.07,32),mat(0xb8a27a,{roughness:1}),'drain',[0,TB+.04,0]);sediment.visible=false;
+
+// centre flue + baffle
+add(new THREE.CylinderGeometry(.14,.14,4.35,20,1,true),mat(0x3c3f44,{side:THREE.DoubleSide,metalness:.5}),'flue',[0,2.75,0]);
+for(let i=0;i<34;i++){add(new THREE.BoxGeometry(.24,.11,.02),mat(0x8a8f96),'baffle',[0,.75+i*.118,0],[0,i*.42,0]);}
+
+// combustion chamber: burner, pilot, arrestor
+add(new THREE.CylinderGeometry(.92,.92,.05,40),mat(0x2b2e33,{roughness:.9}),'arrestor',[0,.06,0]);
+const screen=add(new THREE.BoxGeometry(.5,.12,.04),mat(0x9aa3ad,{metalness:.5}),'arrestor',[.55,.12,.86],[0,Math.PI/4,0]);
+add(new THREE.TorusGeometry(.32,.055,10,36),mat(0x8d8f93,{metalness:.6}),'burner',[0,.25,0],[Math.PI/2,0,0]);
+cyl([.62,.62,.62],[.18,.25,.18],.04,0x9b9b9b,'burner');
+add(new THREE.CylinderGeometry(.03,.03,.12,10),mat(0x777777),'pilot',[.4,.28,.22]);
+cyl([.66,.7,.5],[.4,.24,.22],.015,0xc9894a,'pilot'); // thermocouple lead
+cyl([.68,.74,.46],[.42,.22,.24],.013,0xb0b0b0,'pilot'); // pilot tube
+const tcTip=add(new THREE.CylinderGeometry(.02,.02,.12,8),mat(0xc9894a),'pilot',[.36,.32,.25],[0,0,.5]);
+// flames
+const flames=new THREE.Group();scene.add(flames);
+for(let i=0;i<14;i++){const a=i/14*Math.PI*2;
+  const f=new THREE.Mesh(new THREE.ConeGeometry(.05,.22,8),new THREE.MeshBasicMaterial({color:i%2?0x4aa8ff:0x6fc0ff,transparent:true,opacity:.85}));
+  f.position.set(Math.cos(a)*.32,.38,Math.sin(a)*.32);flames.add(f);}
+const flameGlow=new THREE.PointLight(0x66aaff,0,3);flameGlow.position.set(0,.4,0);scene.add(flameGlow);
+const pilotFlame=new THREE.Mesh(new THREE.ConeGeometry(.025,.12,8),new THREE.MeshBasicMaterial({color:0x5ab4ff}));
+pilotFlame.position.set(.4,.4,.22);scene.add(pilotFlame);
+
+// gas valve (front-right, 45°)
+const gv=new THREE.Group();gv.position.set(.78,.95,.78);gv.rotation.y=Math.PI/4;scene.add(gv);
+function gvAdd(geo,color,pos,rot){const m=new THREE.Mesh(geo,mat(color));m.position.set(...pos);if(rot)m.rotation.set(...rot);m.userData.part='gasvalve';pickables.push(m);gv.add(m);return m;}
+gvAdd(new THREE.BoxGeometry(.42,.34,.24),0x3a3d42,[0,0,.12]);
+const knob=gvAdd(new THREE.CylinderGeometry(.08,.08,.06,20),0xd23a2a,[0,.08,.27],[Math.PI/2,0,0]);
+gvAdd(new THREE.BoxGeometry(.13,.03,.02),0xffffff,[0,.08,.31]);
+const dial=gvAdd(new THREE.CylinderGeometry(.06,.06,.04,20),0x222222,[0,-.1,.26],[Math.PI/2,0,0]);
+const ledM=new THREE.MeshBasicMaterial({color:0x22ff66});const led=new THREE.Mesh(new THREE.SphereGeometry(.02,8,8),ledM);led.position.set(.15,.12,.25);gv.add(led);
+cyl([.68,.95,.68],[.28,.95,.28],.035,0xe8e8e8,'probe');
+
+// gas piping with dripleg + shutoff
+cyl([.92,.95,.92],[1.45,.95,.92],.045,0x2a2a2a,'gaspipe');
+cyl([1.45,.3,.92],[1.45,2.8,.92],.05,0x2a2a2a,'gaspipe');
+add(new THREE.CylinderGeometry(.07,.07,.1,12),mat(0x2a2a2a),'gaspipe',[1.45,.28,.92]);
+const gasShut=add(new THREE.BoxGeometry(.32,.05,.06),mat(0xf2c200),'gaspipe',[1.45,2.0,1.0]);
+
+// cold inlet + dip tube
+const CX=-.45,CZ=.25;
+cyl([CX,4.9,CZ],[CX,6.4,CZ],.05,0xb87333,'cold');
+const coldHandle=add(new THREE.BoxGeometry(.28,.05,.06),mat(0x2d7cf0),'cold',[CX,5.7,CZ+.08]);
+const dipFull=cyl([CX,TT,CZ],[CX,.95,CZ],.035,0xf4f4f4,'dip');
+const dipBroken=cyl([CX,TT,CZ],[CX,4.1,CZ],.035,0xf4f4f4,'dip');dipBroken.visible=false;
+// hot outlet
+const HX=.45,HZ=-.25;
+cyl([HX,4.9,HZ],[HX,6.4,HZ],.05,0xb87333,'hot');
+add(new THREE.CylinderGeometry(.075,.075,.18,14),mat(0xd0a040),'hot',[HX,5.0,HZ]);
+add(new THREE.CylinderGeometry(.075,.075,.18,14),mat(0xd0a040),'cold',[CX,5.0,CZ]);
+// anode
+add(new THREE.CylinderGeometry(.07,.07,.05,6),mat(0xaaaaaa),'anode',[-.1,4.93,-.5]);
+const anodeRod=cyl([-.1,TT,-.5],[-.1,1.0,-.5],.04,0xb9c0c8,'anode');
+// T&P + discharge
+add(new THREE.BoxGeometry(.2,.22,.18),mat(0xc9a13a,{metalness:.6}),'tp',[-1.07,4.35,-.1]);
+add(new THREE.BoxGeometry(.04,.16,.05),mat(0xc33),'tp',[-1.07,4.5,-.1]);
+cyl([-1.17,4.35,-.1],[-1.3,4.35,-.1],.045,0xb87333,'discharge');
+cyl([-1.3,4.38,-.1],[-1.3,.5,-.1],.045,0xb87333,'discharge');
+const drip=new THREE.Mesh(new THREE.SphereGeometry(.035,8,8),new THREE.MeshBasicMaterial({color:0x66ccff}));scene.add(drip);drip.visible=false;
+const puddle=new THREE.Mesh(new THREE.CircleGeometry(.35,24),new THREE.MeshBasicMaterial({color:0x3d6c94,transparent:true,opacity:.6}));puddle.rotation.x=-Math.PI/2;puddle.position.set(-1.3,.01,-.1);scene.add(puddle);puddle.visible=false;
+// drain valve
+add(new THREE.BoxGeometry(.18,.14,.14),mat(0xc9a13a,{metalness:.6}),'drain',[1.06,.75,-.3]);
+cyl([1.12,.75,-.3],[1.28,.75,-.3],.04,0xc9a13a,'drain');
+// draft hood + vent
+for(let i=0;i<3;i++){const a=i/3*Math.PI*2;cyl([Math.cos(a)*.3,4.9,Math.sin(a)*.3],[Math.cos(a)*.38,5.08,Math.sin(a)*.38],.02,0x999999,'drafthood');}
+const hoodM=mat(0xa7adb4,{side:THREE.DoubleSide,metalness:.5});
+const hood=add(new THREE.CylinderGeometry(.21,.46,.32,28,1,true),hoodM,'drafthood',[0,5.24,0]);
+add(new THREE.CylinderGeometry(.21,.21,1.6,24,1,true),mat(0xa7adb4,{side:THREE.DoubleSide,metalness:.5}),'vent',[0,6.2,0]);
+
+// particles: flue gas, spillage, water in dip tube
+const gasP=[];for(let i=0;i<40;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.04,6,6),new THREE.MeshBasicMaterial({color:0xffa65a,transparent:true,opacity:.7}));s.userData.t=Math.random();scene.add(s);s.visible=false;gasP.push(s);}
+const waterP=[];for(let i=0;i<10;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.035,6,6),new THREE.MeshBasicMaterial({color:0x4fa3ff}));s.userData.t=i/10;scene.add(s);s.visible=false;waterP.push(s);}
+const hotP=[];for(let i=0;i<8;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.035,6,6),new THREE.MeshBasicMaterial({color:0xff6a4a}));s.userData.t=i/8;scene.add(s);s.visible=false;hotP.push(s);}
+
+/* =========================================================
+   SIMULATION
+   ========================================================= */
+const S={T:Array(NL).fill(140),set:140,cold:50,simT:0,speed:60,
+ gas:true,knob:'ON',pilot:true,tc:1,holding:false,offAt:-9999,
+ burner:false,tap:false,inlet:true,eco:false,tpOpen:false,
+ f:{},msg:''};
+function resetNormal(){Object.assign(S,{T:Array(NL).fill(140),set:140,gas:true,knob:'ON',pilot:true,tc:1,holding:false,burner:false,tap:false,inlet:true,eco:false,tpOpen:false,f:{},msg:''});for(let i=0;i<NL;i++)S.T[i]=128+i*1.2;}
+function coldStart(){resetNormal();S.T=Array(NL).fill(50);S.gas=false;S.knob='OFF';S.pilot=false;S.tc=0;S.offAt=-9999;}
+resetNormal();
+
+const thermoT=()=>S.T[1];
+function safetyHeld(){return S.tc>.6&&!S.f.tc&&!S.eco&&!S.f.fvir;}
+function outletT(){ if(!S.tap) return null; if(!S.inlet) return null;
+  if(S.f.dip) return S.T[NL-1]*.3+S.cold*.7; return S.T[NL-1]; }
+
+function step(dt){
+  S.simT+=dt;
+  const gasOK=S.gas&&S.knob!=='OFF';
+  // pilot & thermocouple
+  if(S.holding&&gasOK&&S.knob==='PILOT'&&!S.f.fvir){S.pilot=true;}
+  if(S.pilot&&!S.holding&&!safetyHeld()){S.pilot=false;}
+  if(!gasOK)S.pilot=false;
+  // burner (thermostat)
+  const calling=S.f.stuck?true:(S.burner?thermoT()<S.set:thermoT()<=S.set-20);
+  S.burner=S.pilot&&safetyHeld()&&S.knob==='ON'&&gasOK&&calling;
+  const Q=S.burner?(40000/3600)*(S.f.sed?.4:.7):0;
+  S.T[0]+=Q*dt/27.8;
+  if(S.f.spill&&S.burner) S.T[0]-=Q*dt/27.8*.15;
+  // standby loss
+  for(let i=0;i<NL;i++)S.T[i]-=(S.T[i]-65)*6e-6*dt*(S.pilot?1:1.2);
+  // draw
+  if(S.tap&&S.inlet){const f=Math.min(.4,.0125*dt);
+    if(S.f.dip){S.T[NL-1]+=(S.cold-S.T[NL-1])*f*.5;S.T[NL-2]+=(S.T[NL-1]-S.T[NL-2])*f*.3;}
+    else{for(let i=NL-1;i>0;i--)S.T[i]+=(S.T[i-1]-S.T[i])*f;S.T[0]+=(S.cold-S.T[0])*f;}}
+  // convection + diffusion
+  for(let k=0;k<2;k++)for(let i=0;i<NL-1;i++){const a=S.T[i],b=S.T[i+1];
+    if(a>b+.05){const d=(a-b)*Math.min(.5,.25*dt);S.T[i]-=d;S.T[i+1]+=d;}
+    else{const d=(a-b)*Math.min(.2,.0008*dt);S.T[i]-=d;S.T[i+1]+=d;}}
+  // ECO + T&P
+  if(thermoT()>=195&&!S.eco){S.eco=true;S.msg='ECO opened at 195°F — single-use: gas valve must be replaced.';}
+  const mx=Math.max(...S.T);S.tpOpen=mx>=210||S.f.tp;
+  if(mx>=210)for(let i=NL-3;i<NL;i++)S.T[i]=Math.min(S.T[i],209);
+}
+
+/* =========================================================
+   UI
+   ========================================================= */
+let mode='learn',sel=null;
+const panel=document.getElementById('panel'),chips=document.getElementById('chips');
+document.querySelectorAll('#top button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#top button').forEach(x=>x.classList.remove('on'));b.classList.add('on');mode=b.dataset.m;
+  if(mode!=='diagnose'&&D.active){endScenario();}
+  render();});
+const f0=t=>t==null?'—':Math.round(t)+'°F';
+function chipsHTML(){
+  const out=outletT();
+  return `<div class="chip">Tank top <b>${f0(S.T[NL-1])}</b></div>
+  <div class="chip">Thermostat <b>${f0(thermoT())}</b> / set ${S.set}</div>
+  <div class="chip ${S.tap?(out==null?'bad':'ok'):''}">Tap <b>${S.tap?(out==null?'no flow':f0(out)):'closed'}</b></div>
+  <div class="chip ${S.pilot?'ok':'bad'}">Pilot <b>${S.pilot?'ON':'OUT'}</b></div>
+  <div class="chip ${S.burner?'warn':''}">Burner <b>${S.burner?'FIRING':'off'}</b></div>
+  ${S.eco&&mode!=='diagnose'?'<div class="chip bad"><b>ECO OPEN</b></div>':''}${S.tpOpen?'<div class="chip bad"><b>T&P discharging</b></div>':''}`;
+}
+function seqHTML(){
+  const st=[!S.gas||S.knob==='OFF'?0:1,S.pilot?1:0,safetyHeld()&&S.pilot?1:0,S.knob==='ON'?1:0,S.burner?1:0];
+  const items=[
+   "Gas supply ON at appliance shut-off, valve knob turned from OFF",
+   "Pilot lit (knob in PILOT, held down)",
+   "Thermocouple heated → holds SAFETY valve open (ECO in series must be closed)",
+   "Knob to ON → thermostat now controls the main valve",
+   "Water at thermostat ≤ setpoint − 20°F → main valve snaps OPEN → pilot lights main burner",
+   "Flue gases → centre flue → baffle → draft hood (dilution air) → vent",
+   "Setpoint reached → main valve snaps CLOSED. Pilot stays lit. Standby."];
+  let now=st.indexOf(0);if(now<0)now=4;
+  return '<ol class="seq">'+items.map((t,i)=>{let c='';
+    if(i<4){c=st[i]?'done':(i===now?'now':'');}
+    else if(i===4||i===5){c=S.burner?'now':'';}
+    else{c=(!S.burner&&st[3]&&S.pilot&&safetyHeld())?'now':'';}
+    return `<li class="${c}">${t}</li>`}).join('')+'</ol>';
+}
+function learnHTML(){
+  if(!sel)return `<h2>Conventional vent water heater</h2>
+  <p>Natural-draft, underfired storage heater with a constant pilot — the most common type (G2 Module 18.1.1.1). Front-left quarter is cut away so you can see inside. Water colour = temperature (blue cold → red hot).</p>
+  <div class="ar">اضغط على أي قطعة بالموديل حتى تشوف شنو هي وشلون تشتغل.</div>
+  <div class="row"><button class="btn" id="cut">${cutOn?'Close cutaway':'Open cutaway'}</button><button class="btn" id="tour">Next part ▶</button></div>
+  <h3>Parts</h3><div class="row">${Object.keys(PARTS).map(k=>`<button class="btn" data-p="${k}">${PARTS[k].n.split(' (')[0].split(' –')[0]}</button>`).join('')}</div>`;
+  const p=PARTS[sel];
+  return `<h2>${p.n}</h2><p>${p.t}</p><div class="ar">${p.ar}</div><div class="ref">Book: G2 ${p.r}</div>
+  <div class="row"><button class="btn" id="back">◀ All parts</button><button class="btn" id="tour">Next part ▶</button></div>`;
+}
+function operateHTML(){
+  const wait=Math.max(0,300-(S.simT-S.offAt));
+  return `<h2>Operate it</h2>${S.msg?`<div class="warnbox">${S.msg}</div>`:''}
+  <h3>Sequence of operation (live)</h3>${seqHTML()}
+  <label class="sw">Appliance gas shut-off <button class="btn ${S.gas?'g':'r'}" id="gas">${S.gas?'OPEN':'CLOSED'}</button></label>
+  <label class="sw">Gas valve knob <span class="row" style="margin:0">${['OFF','PILOT','ON'].map(k=>`<button class="btn ${S.knob===k?'p':''}" data-k="${k}">${k}</button>`).join('')}</span></label>
+  <button class="btn p" id="light" style="width:100%;padding:13px">HOLD: depress knob + piezo spark</button>
+  <div style="height:8px;background:#232d3a;border-radius:4px;margin:6px 0"><div id="tcbar" style="height:8px;width:${S.tc*100}%;background:${S.tc>.6?'#5fd38a':'#ffc24b'};border-radius:4px"></div></div>
+  <div class="ref">Thermocouple heat ${S.tc>.6?'— enough to hold safety valve':'— keep holding'}${S.knob==='OFF'&&wait>0?` · Wait ${Math.ceil(wait/60)} min before lighting`:''}</div>
+  <label class="sw">Thermostat setpoint <b>${S.set}°F</b></label><input type="range" min="100" max="160" step="5" value="${S.set}" id="set">
+  <label class="sw">Hot water tap <button class="btn ${S.tap?'g':''}" id="tap">${S.tap?'RUNNING':'CLOSED'}</button></label>
+  <label class="sw">Cold inlet shut-off <button class="btn ${S.inlet?'g':'r'}" id="inlet">${S.inlet?'OPEN':'CLOSED'}</button></label>
+  <label class="sw">Time speed <span class="row" style="margin:0">${[1,20,60,240].map(v=>`<button class="btn ${S.speed===v?'p':''}" data-s="${v}">×${v}</button>`).join('')}</span></label>
+  <div class="row"><button class="btn" id="cold">New install (cold tank, all off)</button><button class="btn" id="norm">Reset to normal</button></div>
+  <div class="ar">جرّب: سكّر الحنفية الحارة وشوف الثيرموستات شلون يشغّل الشعلة لما ينزل 20 درجة عن الضبط.</div>
+  <div class="ref">Lighting rules & sequence: G2 p.18-17, 18-19, 18-20. Simulated: 40 gal, 40,000 Btuh, cold water 50°F, no mixing valve.</div>`;
+}
+/* ---------- Diagnose ---------- */
+const D={active:null,log:[],done:false,pick:null,score:0,count:0,correct:0};
+function startScenario(){
+  resetNormal();const s=SC[Math.floor(Math.random()*SC.length)];D.active=s;D.log=[];D.done=false;D.pick=null;
+  const set=(arr)=>arr.forEach(([k,v])=>S.f[k]=v);
+  switch(s.id){
+   case 'tc':set([['tc',1]]);S.pilot=false;S.tc=0;S.T=Array(NL).fill(70);break;
+   case 'eco':S.eco=true;S.pilot=false;S.tc=0;S.T=Array(NL).fill(95);break;
+   case 'dip':set([['dip',1]]);S.tap=true;break;
+   case 'tp':set([['tp',1]]);break;
+   case 'sed':set([['sed',1]]);S.T=S.T.map(t=>t-40);break;
+   case 'spill':set([['spill',1]]);S.T=S.T.map(t=>t-35);break;
+   case 'anode':set([['anode',1]]);break;
+   case 'hot':S.set=160;S.T=Array(NL).fill(156);break;
+   case 'fvir':set([['fvir',1]]);S.pilot=false;S.tc=0;S.T=Array(NL).fill(60);break;
+   case 'inlet':S.inlet=false;S.tap=true;break;
+  }
+  render();
+}
+function endScenario(){D.active=null;resetNormal();}
+function diagnoseHTML(){
+  if(!D.active)return `<h2>Diagnose a service call</h2>
+  <p>You get a customer complaint. Run tests like on a real call, then choose your diagnosis. Fewer tests = higher score. Every scenario comes from G2 Module 18 troubleshooting.</p>
+  <div class="ar">مثل الشغل الحقيقي: اسمع الزبون، سوّي فحوصات، وبعدين گول شنو العطل.</div>
+  ${D.count?`<div class="goodbox">Score so far: ${D.correct}/${D.count} correct · ${D.score} pts</div>`:''}
+  <button class="btn p" id="new" style="width:100%;padding:13px">Start a service call</button>`;
+  const s=D.active;
+  let h=`<h2>Service call</h2><div class="warnbox">Customer: ${s.c}</div><h3>Tests</h3><div class="row">`+
+   Object.keys(TESTS).map(k=>`<button class="btn" data-t="${k}" ${D.done?'disabled':''}>${TESTS[k]}</button>`).join('')+'</div>';
+  if(D.log.length)h+='<div class="log">'+D.log.map(([k,r])=>`<div><b>${TESTS[k]}:</b> ${r}</div>`).join('')+'</div>';
+  if(!D.done){h+=`<h3>Your diagnosis</h3><div class="row">${DXLIST.map((d,i)=>`<button class="btn ${D.pick===i?'sel':''}" data-d="${i}">${d}</button>`).join('')}</div>
+   <button class="btn p" id="submit" ${D.pick==null?'disabled':''} style="width:100%;padding:12px">Submit diagnosis</button>`;}
+  else{const ok=DXLIST[D.pick]===s.dx;
+   h+=`<div class="${ok?'goodbox':'badbox'}"><b>${ok?'Correct!':'Not quite.'}</b> Answer: <b>${s.dx}</b><br>${s.fix}<div class="ref">Book: G2 ${s.ref}</div></div>
+   <button class="btn p" id="new" style="width:100%;padding:12px">Next service call</button> <button class="btn" id="quit" style="width:100%;margin-top:6px">Back to normal heater</button>`;}
+  return h;
+}
+function render(){
+  if(mode==='learn')panel.innerHTML=learnHTML();
+  else if(mode==='operate')panel.innerHTML=operateHTML();
+  else if(mode==='diagnose')panel.innerHTML=diagnoseHTML();
+  else panel.innerHTML=CODE_HTML;
+  wire();
+}
+function wire(){
+  const q=s=>panel.querySelector(s),qa=s=>panel.querySelectorAll(s);
+  qa('[data-p]').forEach(b=>b.onclick=()=>selectPart(b.dataset.p));
+  if(q('#back'))q('#back').onclick=()=>selectPart(null);
+  if(q('#tour'))q('#tour').onclick=()=>{const k=Object.keys(PARTS);selectPart(k[(k.indexOf(sel)+1)%k.length]);};
+  if(q('#cut'))q('#cut').onclick=()=>{cutOn=!cutOn;clipMats.forEach(m=>{m.clippingPlanes=cutOn?clips:[];m.needsUpdate=true;});render();};
+  if(q('#gas'))q('#gas').onclick=()=>{S.gas=!S.gas;if(!S.gas){S.pilot=false;}render();};
+  qa('[data-k]').forEach(b=>b.onclick=()=>{const k=b.dataset.k;
+    if(k==='OFF'&&S.knob!=='OFF'){S.offAt=S.simT;S.pilot=false;}
+    if(k==='ON'&&!S.pilot)S.msg='Knob is ON but pilot is out — no gas will flow to the burner.';else S.msg='';
+    S.knob=k;render();});
+  const L=q('#light');
+  if(L){const down=e=>{e.preventDefault();
+      if(!S.gas){S.msg='Open the appliance gas shut-off first.';render();return;}
+      if(S.knob!=='PILOT'){S.msg='Turn the knob to PILOT first, then depress it.';render();return;}
+      if(S.simT-S.offAt<300){S.msg='Lighting label: wait 5 minutes with the valve OFF before introducing a flame. Speed up time and try again.';render();return;}
+      if(S.f.fvir){S.msg='Spark, but no pilot — gas is cut (FVIR thermal switch open).';render();return;}
+      S.holding=true;S.msg='Holding knob down… keep holding until thermocouple is hot.';};
+    const up=()=>{if(!S.holding)return;S.holding=false;
+      setTimeout(()=>{S.msg=S.pilot?'Pilot stayed lit. Now turn the knob to ON.':'Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault.';if(mode==='operate')render();},60);};
+    L.addEventListener('pointerdown',down);L.addEventListener('pointerup',up);L.addEventListener('pointerleave',up);L.addEventListener('pointercancel',up);}
+  if(q('#set'))q('#set').oninput=e=>{S.set=+e.target.value;q('label.sw b').textContent;render();};
+  if(q('#tap'))q('#tap').onclick=()=>{S.tap=!S.tap;render();};
+  if(q('#inlet'))q('#inlet').onclick=()=>{S.inlet=!S.inlet;render();};
+  qa('[data-s]').forEach(b=>b.onclick=()=>{S.speed=+b.dataset.s;render();});
+  if(q('#cold'))q('#cold').onclick=()=>{coldStart();S.msg='New install: tank full of cold water. Open gas, knob to PILOT, wait out the 5 min, then light.';render();};
+  if(q('#norm'))q('#norm').onclick=()=>{resetNormal();render();};
+  if(q('#new'))q('#new').onclick=startScenario;
+  if(q('#quit'))q('#quit').onclick=()=>{endScenario();render();};
+  qa('[data-t]').forEach(b=>b.onclick=()=>{const k=b.dataset.t;if(D.log.find(x=>x[0]===k))return;
+    D.log.push([k,(D.active.r[k])||DEF[k]]);render();const lg=panel.querySelector('.log');if(lg)lg.lastElementChild.scrollIntoView({block:'center'});});
+  qa('[data-d]').forEach(b=>b.onclick=()=>{D.pick=+b.dataset.d;render();});
+  if(q('#submit'))q('#submit').onclick=()=>{D.done=true;D.count++;
+    if(DXLIST[D.pick]===D.active.dx){D.correct++;D.score+=Math.max(20,100-Math.max(0,D.log.length-3)*10);}render();};
+}
+
+/* picking + highlight */
+function selectPart(k){
+  sel=k;pickables.forEach(m=>{if(m.material.emissive)m.material.emissive.setHex(m.userData.part===k?0x7a3a00:0x000000);});
+  if(mode!=='learn'){document.querySelector('[data-m=learn]').click();return;}
+  render();
+}
+const ray=new THREE.Raycaster(),ptr=new THREE.Vector2();let downXY=null;
+canvas.addEventListener('pointerdown',e=>downXY=[e.clientX,e.clientY]);
+canvas.addEventListener('pointerup',e=>{if(!downXY)return;const dx=Math.abs(e.clientX-downXY[0])+Math.abs(e.clientY-downXY[1]);downXY=null;if(dx>8)return;
+  const r=canvas.getBoundingClientRect();ptr.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);
+  ray.setFromCamera(ptr,camera);
+  const hits=ray.intersectObjects(pickables.filter(m=>m.visible),false).filter(h=>{
+    if(!cutOn||!h.object.material.clippingPlanes||!h.object.material.clippingPlanes.length)return true;
+    return !(h.point.x<0&&h.point.z>0);});
+  // prefer non-shell parts
+  const order=hits.sort((a,b)=>{const sh=p=>['tank','jacket'].includes(p)?1:0;return sh(a.object.userData.part)-sh(b.object.userData.part)||a.distance-b.distance;});
+  if(order.length)selectPart(order[0].object.userData.part);});
+
+/* =========================================================
+   LOOP
+   ========================================================= */
+function tcol(t){const k=Math.min(1,Math.max(0,(t-50)/(170-50)));return new THREE.Color().setHSL(.62*(1-k),.85,.5);}
+let fitted=false;
+function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;
+  camera.setViewOffset(w,h,0,h*.2,w,h);camera.updateProjectionMatrix();
+  if(!fitted){fitted=true;const a=Math.min(1.2,w/h);const dist=Math.max(11,11/Math.pow(a,.9));
+    const dir=new THREE.Vector3(-6.2,1.6,7.4).normalize();camera.position.copy(controls.target).add(dir.multiplyScalar(dist));
+    controls.maxDistance=dist*1.6;}}
+addEventListener('resize',resize);resize();
+let last=performance.now(),uiT=0,clock=0;
+function loop(now){
+  const rdt=Math.min(.1,(now-last)/1000);last=now;clock+=rdt;
+  // thermocouple heats in real time
+  if(S.pilot)S.tc=Math.min(1,S.tc+rdt/3);else S.tc=Math.max(0,S.tc-rdt/4);
+  let sdt=rdt*S.speed;while(sdt>0){const d=Math.min(1,sdt);step(d);sdt-=d;}
+  // visuals
+  layers.forEach((m,i)=>m.material.color.copy(tcol(S.T[i])));
+  flames.visible=S.burner;flameGlow.intensity=S.burner?1.2:0;
+  flames.children.forEach((f,i)=>{f.scale.y=.8+.35*Math.sin(clock*18+i*1.7);f.material.color.setHex(S.f.spill?(i%2?0xffa040:0x4aa8ff):(i%2?0x4aa8ff:0x6fc0ff));});
+  pilotFlame.visible=S.pilot;pilotFlame.scale.y=.9+.2*Math.sin(clock*20);
+  ledM.color.setHex(S.burner?0x22ff66:(S.pilot?0x1a8a3a:0x331111));
+  knob.rotation.z={OFF:0,PILOT:Math.PI/2,ON:Math.PI}[S.knob];knob.position.z=S.holding?.24:.27;
+  dial.rotation.z=(S.set-100)/60*Math.PI*1.4;
+  gasShut.rotation.y=S.gas?0:Math.PI/2;coldHandle.rotation.y=S.inlet?0:Math.PI/2;
+  dipFull.visible=!S.f.dip;dipBroken.visible=!!S.f.dip;
+  sediment.visible=!!S.f.sed;
+  anodeRod.scale.set(S.f.anode?.45:1,1,S.f.anode?.45:1);anodeRod.material.color.setHex(S.f.anode?0xb59c55:0xb9c0c8);
+  screen.material.color.setHex(S.f.fvir?0x6b5532:0x9aa3ad);
+  hoodM.color.setHex(S.f.spill?0x5a4a3a:0xa7adb4);
+  // flue gas
+  gasP.forEach((s,i)=>{s.visible=S.burner;if(!S.burner)return;s.userData.t=(s.userData.t+rdt*.35)%1;const t=s.userData.t;
+    const spill=S.f.spill&&i%2===0;
+    if(t<.75){s.position.set(Math.sin(t*40+i)*.06,.5+t/.75*4.45,Math.cos(t*40+i)*.06);}
+    else if(spill){const u=(t-.75)/.25,a=i*2.3;s.position.set(Math.cos(a)*(.3+u*.9),4.95-u*.4,Math.sin(a)*(.3+u*.9));}
+    else{s.position.set(0,4.95+(t-.75)/.25*2.2,0);}
+    s.material.color.setHex(t<.4?0xffa65a:0xb7b0a8);s.material.opacity=spill&&t>.75?.9:.6;});
+  const flow=S.tap&&S.inlet;
+  waterP.forEach(s=>{s.visible=flow;if(!flow)return;s.userData.t=(s.userData.t+rdt*.5)%1;const t=s.userData.t;
+    if(t<.25)s.position.set(CX,6.3-t/.25*1.5,CZ+.06);else{const bot=S.f.dip?4.1:1.0;s.position.set(CX,4.8-(t-.25)/.75*(4.8-bot),CZ);}});
+  hotP.forEach(s=>{s.visible=flow;if(!flow)return;s.userData.t=(s.userData.t+rdt*.5)%1;s.position.set(HX,4.7+s.userData.t*1.6,HZ+.06);
+    s.material.color.copy(tcol(outletT()||50));});
+  drip.visible=S.tpOpen;puddle.visible=S.tpOpen;
+  if(S.tpOpen){const t=(clock*1.2)%1;drip.position.set(-1.3,.48-t*.46,-.1);}
+  controls.update();renderer.render(scene,camera);
+  uiT+=rdt;if(uiT>.4){uiT=0;chips.innerHTML=chipsHTML();
+    if(mode==='operate'){const b=document.getElementById('tcbar');if(b){b.style.width=S.tc*100+'%';b.style.background=S.tc>.6?'#5fd38a':'#ffc24b';}
+      const sq=panel.querySelector('ol.seq');if(sq)sq.outerHTML=seqHTML();}}
+  requestAnimationFrame(loop);
+}
+render();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
