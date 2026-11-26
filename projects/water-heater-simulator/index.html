@@ -338,7 +338,7 @@ function resetNormal(){Object.assign(S,{T:Array(NL).fill(140),set:140,gas:true,k
 function coldStart(){resetNormal();S.T=Array(NL).fill(50);S.gas=false;S.knob='OFF';S.pilot=false;S.tc=0;startPurge();}
 const PURGE=15; // real seconds shown as 5:00 → 0:00, independent of time speed
 function startPurge(){S.purge=PURGE;}
-const valveOff=()=>S.knob==='OFF'||!S.gas; // purge only counts while gas to the pilot is shut
+const valveOff=()=>S.knob==='OFF'; // purge only counts with the gas valve knob OFF (lighting label, G2 p.18-17)
 function purgeTick(sec){if(valveOff())S.purge=Math.max(0,S.purge-sec);} // paused (not reset) while knob is PILOT/ON
 resetNormal();
 
@@ -505,7 +505,10 @@ function release(e){if(!S.holding)return;if(e&&e.pointerId!=null&&holdPid!=null&
   // decide now (same rule step() applies next frame), not from S.pilot later
   const holds=S.pilot&&safetyHeld()&&S.gas&&S.knob==='PILOT';
   S.holding=false;holdPid=null;holdKey=false;
-  setMsg(holds?'Pilot stayed lit. Now turn the knob to ON.':'Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault. Turn the knob OFF and wait out the 5 min again.');}
+  if(holds)setMsg('Pilot stayed lit. Now turn the knob to ON.');
+  else if(S.pilot){S.pilot=false;startPurge(); // apply the outcome now so message and state always agree
+    setMsg('Pilot went out when you released the knob — thermocouple not hot enough, or a safety fault. Turn the knob OFF and wait out the 5 min again.');}
+  else setMsg('Released too soon — the pilot never lit. Hold the knob down until the thermocouple is hot.');}
 addEventListener('pointerup',release);addEventListener('pointercancel',release);addEventListener('blur',()=>release());
 document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
 addEventListener('keyup',e=>{if(holdKey&&(e.key===' '||e.key==='Enter'))release();});
