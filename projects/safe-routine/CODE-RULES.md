@@ -43,6 +43,10 @@ Where the rule came from:
 | R10 | On removal: record remover's name, address, TSSA certificate number; send the notice to the gas distributor | Owner | O.Reg 212/01 | | Not checked | |
 | R11 | Homeowners, landlords, general contractors and helpers may not remove a tag or turn the gas back on | Owner | O.Reg 212/01 | | Not checked | |
 | R12 | A job cannot be closed while an immediate-hazard red tag is open, until R1–R3 are recorded | Owner (from answer) | O.Reg 212/01 | | Not checked | |
+| R13 | An immediate-hazard red tag cannot be removed until R1–R3 are recorded | Owner (from answer) | O.Reg 212/01 | | Not checked | **Owner asked: remind before publishing to check the code** |
+| R14 | If the appliance input rating is not recorded, G2 or G1 may remove the tag; G3 cannot | Owner (from answer) | O.Reg 215/01 | | Not checked | |
+| R15 | A red tag that is NOT an immediate hazard needs only: utility told + written notice within 14 days | Owner (from answer) | O.Reg 212/01 | | Not checked | |
+| R16 | "Removed by a TSSA inspector" option — who may record it and what ID is needed | Open | O.Reg 212/01 | | **Not decided** | **Owner asked: re-ask before publishing.** For now: any user except accountant, name only (a known way around R8) |
 
 ## Leak test
 
@@ -67,6 +71,13 @@ Where the rule came from:
 | G2 | Flue CO ≥ 400 ppm air-free shows a warning only (does not block) | App | B149.1, TSSA CAD, manufacturer | | Not checked | Correct limit? Should it block or require a red tag? |
 | G3 | No pressure limits are checked (any positive number is accepted) | App | B149.1, rating plate | | Not checked | Should the app warn outside the rating-plate range? |
 | G4 | Required checks: safety limits tested; venting, combustion air and clearances checked; CO alarm present; appliance left safe | App | B149.1, Ontario Building Code | | Not checked | |
+| G5 | "Left safe" must always be ticked to close a job, every trade, no override | Owner (from answer) | B149.1 | | Not checked | |
+
+## Before publishing — Claude must ask the owner again
+- [ ] R13: check the code requirement for removing a red tag only after steps R1–R3.
+- [ ] R16: decide the "TSSA inspector" removal option.
+- [ ] Every rule above is Approved.
+- [ ] Known prototype limit: "Viewing as" lets anyone pick any user (even a G1), so licence rules are not real security until real login is added.
 
 ## How to approve a rule
 1. Check it in your G2 book or the TSSA document.
