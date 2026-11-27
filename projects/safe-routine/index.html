@@ -90,6 +90,8 @@ svg.i.lg{width:22px; height:22px}
 #banner{position:sticky; top:var(--top-h,63px); z-index:29; margin:14px 24px 0; padding:9px 13px; border-radius:10px; background:color-mix(in srgb, var(--warn) 12%, var(--surface)); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); color:var(--text); font-size:13px; display:flex; flex-direction:column; gap:6px}
 #banner .bl{display:flex; gap:8px; align-items:flex-start}
 #banner .short{display:none}
+/* Focused fields scroll clear of the sticky top bar + banner (heights kept in --top-h / --banner-h by syncTopH). */
+html{scroll-padding-top:calc(var(--top-h,63px) + var(--banner-h,0px) + 8px)}
 #main{padding:20px 24px 90px; max-width:1280px; width:100%}
 #tabbar{display:none}
 
@@ -318,7 +320,14 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
   .modal{padding:18px; border-radius:18px 18px 0 0; align-self:flex-end; max-height:92vh}
   .overlay.sheet{align-items:flex-end; padding:0}
   .hbar{grid-template-columns:100px 1fr 36px}
-  .mobile-sticky{position:sticky; bottom:calc(76px + env(safe-area-inset-bottom,0px)); z-index:20; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(8px); padding:10px 0; margin:0 -2px}
+  .mobile-sticky{position:sticky; bottom:calc(76px + env(safe-area-inset-bottom,0px)); z-index:20; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(8px); padding:6px 0; margin:0 -2px; gap:6px; flex-wrap:nowrap}
+  /* Phone: the job action bar stays compact (buttons side by side) so it covers little of the page. */
+  .mobile-sticky .btn.lg{flex:1 1 0; min-width:0; padding:8px 6px; font-size:13px; gap:5px; border-radius:10px; white-space:normal; line-height:1.15; text-align:center}
+  .mobile-sticky > .hint, .mobile-sticky > .pill{flex:1 1 0; min-width:0; white-space:normal; font-size:11.5px; line-height:1.25}
+  #main:has(.mobile-sticky){padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+  html{scroll-padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+  /* A modal is open: toasts go to the top so they don't cover the form fields or its buttons. */
+  body:has(#overlays .overlay) #toasts{top:calc(10px + env(safe-area-inset-top,0px)); bottom:auto}
 }
 @media (max-width:520px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .kpi .num{font-size:24px} h1{font-size:22px} .steps .lb{font-size:10px} }
 @media print{ #side,#top,#tabbar,.btn,.tabs{display:none!important} #main{padding:0} .card{box-shadow:none} }
@@ -478,15 +487,19 @@ const now = ()=>new Date().toISOString();
 const uid = p=>p+"_"+Math.random().toString(36).slice(2,10);
 const DAY = 86400000;
 const ts = iso=> iso ? new Date(iso).getTime() : 0;
-const fmtTime = iso=> iso ? new Date(iso).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}) : "—";
+/* Any date that can't be read shows as "date can't be read" (never "Invalid Date"). */
+const BAD_DATE_TXT = "date can't be read";
+const isBadIso = iso=> isNaN(new Date(iso).getTime());
+const fmtTime = iso=> !iso ? "—" : isBadIso(iso) ? BAD_DATE_TXT : new Date(iso).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
 const fmtDay = iso=>{
   if (!iso) return "—";
+  if (isBadIso(iso)) return BAD_DATE_TXT;
   const d = new Date(iso), t = new Date(); const diff = Math.round((new Date(d.toDateString()) - new Date(t.toDateString()))/DAY);
   if (diff===0) return "Today"; if (diff===1) return "Tomorrow"; if (diff===-1) return "Yesterday";
   return d.toLocaleDateString(undefined,{weekday:"short", month:"short", day:"numeric"});
 };
-const fmtDate = iso=> iso ? fmtDay(iso)+" · "+fmtTime(iso) : "—";
-const fmtDateOnly = iso=> iso ? new Date(iso).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}) : "—";
+const fmtDate = iso=> !iso ? "—" : isBadIso(iso) ? BAD_DATE_TXT : fmtDay(iso)+" · "+fmtTime(iso);
+const fmtDateOnly = iso=> !iso ? "—" : isBadIso(iso) ? BAD_DATE_TXT : new Date(iso).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
 const ago = iso=>{
   if (!iso) return ""; const s = (Date.now()-ts(iso))/1000;
   if (s<60) return "just now"; if (s<3600) return Math.floor(s/60)+"m ago"; if (s<86400) return Math.floor(s/3600)+"h ago";
@@ -699,23 +712,35 @@ function showSetup(){
       gasLicence:GAS_LICENCES.includes(f.gasLicence.value)?f.gasLicence.value:"none", tssaCertNumber:f.tssaCertNumber.value.trim(), address:"", active:true, createdAt:now(), setupOwner:true};
     if (!(await writeDoc("users/"+id, u))) return;
     /* Two devices may finish setup at the same moment. Re-read: the earliest setup owner (createdAt, then id) is kept,
-       every later one is turned off. Each device applies the same rule, so they agree. */
+       every later one is turned off. Each device applies the same rule, so they agree.
+       If this device's owner was turned off (or can't be confirmed), stay on the setup screen — never log in as someone else. */
+    const stop = msg=>{
+      f.innerHTML = `<div class="row">${brandMark(40)}<div><h2 id="setupH">Setup not finished on this device</h2></div></div>
+        <div class="callout bad mt" role="alert">${icon("alert","sm")}<div>${esc(msg)}</div></div>
+        <div class="mf"><button type="button" class="btn primary" data-reload>Reload</button></div>`;
+      $("[data-reload]", f).addEventListener("click", ()=>location.reload());
+    };
+    const DUP_MSG = "Another device finished setup first. Ask that owner to add you.";
     let warn = "";
     try{
       const all = (await db.collection("users").get()).docs.map(d=>Object.assign({id:d.id}, d.data()));
+      const mine = all.find(x=>x.id===id);
+      if (!mine){ stop("Your owner account couldn't be found after saving. Reload the page and check the team list before going on."); return; }
+      if (mine.active===false || mine.setupDuplicateOf){ stop(DUP_MSG); return; }
       const firsts = all.filter(x=>x.setupOwner && x.role==="owner" && x.active!==false)
         .sort((a,b)=> (ts(a.createdAt)||0)-(ts(b.createdAt)||0) || String(a.id).localeCompare(String(b.id)));
       if (firsts.length>1){
-        const keep = firsts[0];
-        for (const x of firsts.slice(1)) await writeDoc("users/"+x.id, {active:false, setupDuplicateOf:keep.id}, true, true);
-        warn = keep.id===id
-          ? "Another owner account was created at the same moment on another device. It was turned off; yours is kept."
-          : `Someone else (${keep.name||"another person"}) finished setup a moment earlier on another device. Their owner account is kept and yours was turned off. Ask them to add you under Team.`;
+        const keep = firsts[0]; let failed = 0;
+        for (const x of firsts.slice(1)) if (!(await writeDoc("users/"+x.id, {active:false, setupDuplicateOf:keep.id}, true, true))) failed++;
+        if (keep.id!==id){ stop(DUP_MSG+(failed?" Your extra owner account couldn't be turned off here — ask that owner to turn it off under Team.":"")); return; }
+        warn = failed
+          ? "Another owner account was created at the same moment on another device, and it couldn't be turned off. Turn it off under Team."
+          : "Another owner account was created at the same moment on another device. It was turned off; yours is kept.";
       }
     }catch(e){ console.error(e); warn = "Couldn't double-check the team list after setup. Reload and check Team for a second owner account."; }
     await loadAll();
+    if (!setUser(id, true)){ stop("Your owner account couldn't be loaded. Reload the page and check the team list before going on."); return; }
     wrap.remove();
-    if (!setUser(id, true)) restoreUser();
     if (warn){ toast(warn, "bad"); const m = $("#main"); if (m) m.prepend(el(`<div class="callout bad" style="margin-bottom:12px">${icon("alert","sm")}<div>${esc(warn)}</div></div>`)); }
     else toast(`Welcome, ${firstName(name)}. Add your team under Team.`);
   });
@@ -871,6 +896,8 @@ const HZ_STEPS = [
   {k:"distributorNotifiedAt", by:"distributorNotifiedRecordedBy", rec:"distributorNotifiedRecordedAt", label:"Gas utility told verbally (right away)"},
   {k:"writtenNoticeSentAt", by:"writtenNoticeSentBy", rec:"writtenNoticeSentRecordedAt", label:"Written notice sent to the gas utility"},
 ];
+/* A step (or notice) counts as recorded only if its value is a readable date string. A corrupt value counts as not recorded. */
+const stepOk = v=> typeof v==="string" && v!=="" && Number.isFinite(new Date(v).getTime());
 const isImmediate = h=> h.hazardLevel==="immediate";
 const hazardSteps = h=> isImmediate(h) ? HZ_STEPS : HZ_STEPS.slice(2);
 const hazardAt = h=> h.createdAt || h.at;
@@ -883,7 +910,7 @@ function noticeDue(h){
 }
 const badDate = d=> !!d && !Number.isFinite(ts(d));
 const dueText = d=> badDate(d) ? "an unreadable date (check the record)" : fmtDateOnly(d);
-function noticeOverdue(h){ const d = noticeDue(h); return !h.writtenNoticeSentAt && !!d && (badDate(d) || Date.now() > ts(d)); }
+function noticeOverdue(h){ const d = noticeDue(h); return !stepOk(h.writtenNoticeSentAt) && !!d && (badDate(d) || Date.now() > ts(d)); }
 
 /* ------------------------------ SEEN / NEW BADGES ------------------------------ */
 const TRACKED = ["notes","media","materials"];
@@ -1060,16 +1087,22 @@ function goBack(){
   render(); window.scrollTo(0,0);
 }
 /* The sticky banner sits just below the sticky top bar; keep its offset equal to the bar's real height. */
-function syncTopH(){ const t = $("#top"); if (t) document.documentElement.style.setProperty("--top-h", t.offsetHeight+"px"); }
-if (window.ResizeObserver) new ResizeObserver(syncTopH).observe(document.getElementById("top")); else window.addEventListener("resize", syncTopH);
+function syncTopH(){
+  const t = $("#top"), b = $("#banner"), root = document.documentElement.style;
+  if (t) root.setProperty("--top-h", t.offsetHeight+"px");
+  if (b) root.setProperty("--banner-h", (b.hidden ? 0 : b.offsetHeight + (parseFloat(getComputedStyle(b).marginTop)||0))+"px");
+}
+if (window.ResizeObserver){ const ro = new ResizeObserver(syncTopH); ro.observe(document.getElementById("top")); ro.observe(document.getElementById("banner")); }
+window.addEventListener("resize", syncTopH);
 function renderBanner(){
   const b = $("#banner"); const rows = [];
   /* .long on wider screens, .short on phones (the banner stays on screen, so it must stay small there). */
   if (!RULES_APPROVED) rows.push(`${icon("alert","sm")}<span class="long"><b>${esc(RULES_WARNING)}</b> ${esc(LOGIN_WARNING)}</span><span class="short"><b>Safety rules not approved (TSSA) — not for real work.</b> “Viewing as” is not real security.</span>`);
   if (mode==="preview") rows.push(`${icon("eye","sm")}<span class="long"><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span><span class="short"><b>Preview:</b> example data, lost on reload.</span>`);
-  else if (S.loadErrors.length) rows.push(`${icon("alert","sm")}<span><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span>`);
+  else if (S.loadErrors.length) rows.push(`${icon("alert","sm")}<span class="long"><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span><span class="short"><b>Some data didn't load</b> — reload before relying on it.</span>`);
   b.hidden = !rows.length;
   b.innerHTML = rows.map(r=>`<div class="bl">${r}</div>`).join("");
+  syncTopH();
 }
 function drawTabbar(){
   const bar = $("#tabbar"); bar.innerHTML = "";
@@ -1516,10 +1549,10 @@ function renderReview(){
     const c = el(`<div class="card"><div class="row between wrap top"><div><div class="row"><span class="mono" style="font-weight:600">${esc(j.refNumber)}</span>${prioPill(j.priority)}</div>
       <div style="font-weight:750;font-size:16px;margin-top:3px">${esc(customerById(j.customerId)?.name||"")}</div><div class="hint">${esc(j.siteAddress)} · ${esc(cap(j.jobType))} · ${esc(userById(j.technicianId)?.name||"")}</div></div>
       <div class="ring" style="--p:${Math.round(done/items.length*100)}"><span>${done}/${items.length}</span></div></div>
-      <div class="row wrap small dim mt">${icon("pencil","sm")} ${s.notes.length} note(s) · ${icon("image","sm")} ${s.media.length} photo(s) · ${icon("gauge","sm")} ${Object.keys(j.readings||{}).filter(k=>k!=="savedBy"&&k!=="savedAt").length} reading(s) · ${icon("receipt","sm")} ${s.materials.length} expense(s)</div>
-      <div class="actionbar mt"><button class="btn" data-open>${icon("eye","sm")} Open job</button><button class="btn go" data-ok>${icon("check","sm")} Approve &amp; close</button><button class="btn danger" data-back>${icon("undo","sm")} Send back</button></div></div>`);
+      <div class="row wrap small dim mt">${icon("pencil","sm")} ${s.notes.length} note(s) · ${icon("image","sm")} ${s.media.length} photo(s) · ${icon("gauge","sm")} ${Object.keys(j.readings||{}).filter(k=>!READING_META.has(k)).length} reading(s) · ${icon("receipt","sm")} ${s.materials.length} expense(s)</div>
+      <div class="actionbar mt"><button class="btn" data-open>${icon("eye","sm")} Open job</button>${cantSelfApprove(j)?`<span class="hint">${esc(SELF_APPROVE_MSG)}</span>`:`<button class="btn go" data-ok>${icon("check","sm")} Approve &amp; close</button>`}<button class="btn danger" data-back>${icon("undo","sm")} Send back</button></div></div>`);
     $("[data-open]", c).addEventListener("click", ()=>openJob(j.id, "completion"));
-    { const ok = $("[data-ok]", c); ok.addEventListener("click", withBusy(ok, ()=>approveJob(j))); }
+    { const ok = $("[data-ok]", c); if (ok) ok.addEventListener("click", withBusy(ok, ()=>approveJob(j))); }
     $("[data-back]", c).addEventListener("click", ()=>sendBackJob(j));
     g.appendChild(c);
   });
@@ -1608,9 +1641,9 @@ function renderJob(id){
     b.addEventListener("click", withBusy(b, ()=>advanceJob(j))); bar.appendChild(b);
   }
   if (can.approve(j)){
-    const a = el(`<button class="btn go lg">${icon("check")} Approve &amp; close</button>`); a.addEventListener("click", withBusy(a, ()=>approveJob(j)));
     const r = el(`<button class="btn danger lg">${icon("undo")} Send back</button>`); r.addEventListener("click", ()=>sendBackJob(j));
-    bar.append(a, r);
+    if (cantSelfApprove(j)) bar.append(el(`<span class="hint">${esc(SELF_APPROVE_MSG)}</span>`), r);
+    else { const a = el(`<button class="btn go lg">${icon("check")} Approve &amp; close</button>`); a.addEventListener("click", withBusy(a, ()=>approveJob(j))); bar.append(a, r); }
   }
   if (!closed && j.status==="completion_review" && !can.approve(j)) bar.appendChild(el(`<span class="pill info">Waiting for a supervisor to review</span>`));
   if (!closed && isField() && j.technicianId===S.userId){ const h = el(`<button class="btn lg">${icon("lifebuoy")} Ask supervisor</button>`); h.addEventListener("click", ()=>openHelpForm(j)); bar.appendChild(h); }
@@ -1695,7 +1728,7 @@ async function advanceJob(j){
     const idx = STATUSES.indexOf(j.status); const next = STATUSES[idx+1];
     if (!next || next==="completed") return;
     if (next==="completion_review"){
-      if (!(await freshHazards())) return;
+      if (!(await freshHazards({noRender:true}))) return;
       const missing = completionItems(j).filter(i=>!i.ok);
       if (missing.length){ toast("Before submitting, add: "+missing.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return; }
     }
@@ -1721,6 +1754,8 @@ function workedOnJob(j, userId){
   return (s.events||[]).some(e=>e.byId===userId && (FIELD_EVENTS.has(e.type) || (e.type==="status" && e.status==="completion_review")));
 }
 const SELF_APPROVE_MSG = "Only a G2 or G1 can approve a job they worked on. Another supervisor (G2 or higher) must approve.";
+/* The person viewing worked on this job and isn't G2/G1: the Approve button is not shown (approveJob still checks). */
+const cantSelfApprove = j=>{ const u = me(); return !!u && workedOnJob(j, u.id) && !hasLic(u, "G2"); };
 async function approveJob(j){
   return once("status:"+j.id, async ()=>{
     /* The approver is fixed when the button is pressed, even if "Viewing as" changes while a box is open. */
@@ -1811,10 +1846,12 @@ function openJobForm(j){
   const eqLocked = inReview || (editing && !!j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length>0);
   const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
   const curTech = j?.technicianId && !fieldUsers().some(u=>u.id===j.technicianId) ? userById(j.technicianId) : null;
-  const techOpts = `<option value="">Unassigned</option>`+(curTech?`<option value="${esc(curTech.id)}" selected>${esc(userLabel(curTech))}</option>`:"")+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
+  /* A technician or equipment id that isn't loaded keeps a placeholder, so an unrelated edit doesn't unassign / unlink it. */
+  const unknownOpt = id=> `<option value="${esc(id)}" selected>(unknown — ${esc(id)})</option>`;
+  const techOpts = `<option value="">Unassigned</option>`+(curTech?`<option value="${esc(curTech.id)}" selected>${esc(userLabel(curTech))}</option>`:j?.technicianId && !userById(j.technicianId)?unknownOpt(j.technicianId):"")+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
-      <div class="field"><label>Customer *</label><select name="customerId" required><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select></div>
+      <div class="field"><label>Customer *</label><select name="customerId" required ${eqLocked?"disabled":""}><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select>${eqLocked?`<div class="hint">${inReview?"Locked while waiting for review.":"Locked: this job's equipment has an open red tag."}</div>`:""}</div>
       <div class="field"><label>Reference #</label><input name="refNumber" value="${esc(j?.refNumber||nextRef())}" ${editing?"readonly":""}></div>
       <div class="field newc" hidden><label>New customer name *</label><input name="newName"></div>
       <div class="field newc" hidden><label>Phone</label><input name="newPhone" type="tel"></div>
@@ -1833,7 +1870,7 @@ function openJobForm(j){
   const f = b;
   function fillEquip(){
     const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid || e.id===j?.equipmentId);
-    f.equipmentId.innerHTML = `<option value="">None</option>`+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
+    f.equipmentId.innerHTML = `<option value="">None</option>`+(j?.equipmentId && !equipmentById(j.equipmentId)?unknownOpt(j.equipmentId):"")+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
   }
   function warn(){
     const w = techWarnings(f.technicianId.value, f.scheduledAt.value?new Date(f.scheduledAt.value).toISOString():now(), f.requiredTrade.value, j?.id);
@@ -1870,10 +1907,11 @@ function openJobForm(j){
       if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
       const changed = k=> String(j[k]??"")!==String(data[k]??"");
       if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
-      if (changed("equipmentId")){
-        if (j.status==="completion_review"){ toast("The equipment can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
+      if (changed("equipmentId") || changed("customerId")){
+        const what = changed("equipmentId") ? "equipment" : "customer";
+        if (j.status==="completion_review"){ toast(`The ${what} can't be changed while the job is waiting for review. Send it back first.`,"bad"); return; }
         if (!(await freshHazards({noRender:true}))) return;
-        if (j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length){ toast("This equipment has an open red tag. It can't be unlinked or swapped until the red tag is removed.","bad"); return; }
+        if (j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length){ toast(what==="equipment" ? "This equipment has an open red tag. It can't be unlinked or swapped until the red tag is removed." : "This job's equipment has an open red tag. The customer can't be changed until the red tag is removed.","bad"); return; }
       }
       const prevTech = j.technicianId;
       if (!(await writeDoc("jobs/"+j.id, data, true))) return;
@@ -1905,15 +1943,35 @@ function readingDef(j){
   }
   return Object.assign({refrigerant:j.requiredTrade==="refrigeration"}, base);
 }
-/* "Left in safe operating condition" counts only if the readings were saved after the newest red-tag removal
-   on this job or its equipment. A missing or unreadable date does not count. */
+/* Removed red tags on this job or its equipment, as known to this device.
+   value: the newest clearedAt/resolvedAt (the stored string; null if no removed tags, or none with a readable date).
+   ids: the removed tags' ids, sorted and joined ("" if none) — a newly removed tag changes it, whatever its clock says.
+   bad: a removed tag has no readable removal date. times: the readable removal times. */
+function removalState(j){
+  const list = S.hazards.filter(h=>h.status==="resolved" && (h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId)));
+  let value = null, best = -Infinity, bad = false; const times = [];
+  list.forEach(h=>{
+    const v = h.clearedAt || h.resolvedAt;
+    if (!stepOk(v)){ bad = true; return; }
+    const t = ts(v); times.push(t);
+    if (t>best || (t===best && v>value)){ best = t; value = v; }
+  });
+  return {value, ids:list.map(h=>String(h.id)).sort().join(","), bad, times};
+}
+/* "Left in safe operating condition" counts only if it was ticked after every red-tag removal on this job or its equipment.
+   New records: the removal state saved with the tick must equal the current one (no device clocks compared).
+   Old records (no leftSafeAfterClear field): saved after every removal; a missing or unreadable removal date does not count. */
 function leftSafeOk(j){
   const r = j.readings||{}; if (!r.leftSafe) return false;
-  const cleared = S.hazards.filter(h=>h.status==="resolved" && (h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId))).map(h=>ts(h.clearedAt||h.resolvedAt));
-  if (!cleared.length) return true;
-  const saved = ts(r.savedAt);
-  return Number.isFinite(saved) && cleared.every(c=>Number.isFinite(c) && saved > c);
+  const rm = removalState(j);
+  if (Object.hasOwn(r, "leftSafeAfterClear")) return (r.leftSafeAfterClear??null)===rm.value && String(r.leftSafeRemovedIds??"")===rm.ids;
+  if (!rm.ids) return true;
+  if (rm.bad) return false;
+  const saved = r.savedAt && stepOk(r.savedAt) ? ts(r.savedAt) : NaN;
+  return Number.isFinite(saved) && rm.times.every(c=>saved > c);
 }
+/* Fields saved with the readings that are not readings themselves. */
+const READING_META = new Set(["savedBy","savedAt","leftSafeAfterClear","leftSafeRemovedIds"]);
 /* Readings that can legitimately be below zero (suction can be in vacuum; outdoor air can be below 0 °F). */
 const NEG_OK_READINGS = new Set(["suction","outdoor"]);
 function jobReadings(j, s){
@@ -1925,7 +1983,7 @@ function jobReadings(j, s){
   const imm = jobHazards(j).filter(isImmediate);
   const tagged = k=> k==="leftSafe" && imm.length>0;
   const checkRow = ([k,label,req])=> tagged(k)
-    ? `<div class="check" style="align-items:center"><span class="pill bad">${icon("tag","sm")} Appliance is red-tagged — gas shut off</span>${imm.every(h=>h.gasShutOffAt)?"":`<span class="hint">Record the gas shut-off time on the red tag (Safety tab).</span>`}</div>`
+    ? `<div class="check" style="align-items:center"><span class="pill bad">${icon("tag","sm")} Appliance is red-tagged — gas shut off</span>${imm.every(h=>stepOk(h.gasShutOffAt))?"":`<span class="hint">Record the gas shut-off time on the red tag (Safety tab).</span>`}</div>`
     : k==="leftSafe" && r.leftSafe && !leftSafeOk(j)
     ? `<label class="check"><input type="checkbox" name="${k}" ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}<div class="hint">A red tag was removed after this was last saved. Tick it again to confirm.</div></span></label>`
     : `<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`;
@@ -1951,13 +2009,18 @@ function jobReadings(j, s){
     const bad = def.fields.filter(([k])=> out[k]!==undefined && parseNum(out[k], NEG_OK_READINGS.has(k))===null);
     if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
-    if (!(await freshHazards())) return;
+    if (!(await freshHazards({noRender:true}))) return;
+    /* A "left safe" tick that was already shown ticked (not ticked again now) only stands if it is still valid after the re-read. */
+    if (out.leftSafe && form.leftSafe && form.leftSafe.defaultChecked && !(j.readings?.leftSafe && leftSafeOk(j))){
+      toast("Something changed — tick “left safe” again.","bad"); renderMain(); return;
+    }
     if (jobHazards(j).some(isImmediate)) delete out.leftSafe;
+    if (out.leftSafe){ const rm = removalState(j); out.leftSafeAfterClear = rm.value; out.leftSafeRemovedIds = rm.ids; }
     if (j.requiredTrade==="hvac" && Number(out.coAirFree)>=400) toast("Flue CO is very high. Check the appliance and consider a red tag before leaving.","bad");
     out.savedBy = me()?.name||""; out.savedAt = now();
     if (!(await writeDoc("jobs/"+j.id, {readings:out}, true))) return;
     j.readings = out;
-    await logEvent(j.id, "readings", {note:isEmpty ? "Readings cleared" : `${Object.keys(out).length-2} reading(s)/check(s) saved`});
+    await logEvent(j.id, "readings", {note:isEmpty ? "Readings cleared" : `${Object.keys(out).filter(k=>!READING_META.has(k)).length} reading(s)/check(s) saved`});
     toast("Readings saved."); renderMain();
   });
   wrap.appendChild(form);
@@ -2068,11 +2131,17 @@ function effectiveLeak(j){
 /* true when the effective result is Fail / Inconclusive / unknown (anything but an explicit Pass). */
 const leakNotPassed = j=>{ const k = leakResultKind(effectiveLeak(j)); return !!k && k!=="pass"; };
 const LEAK_SKIP_BLOCKED = "A failed or inconclusive leak test needs a passing re-test or a red tag.";
-function leakChip(j){
-  const lt = j.leakTest||{status:"not_set"};
+/* Shows the effective result: a Fail / Inconclusive that was later "skipped" or cleared still shows as not OK.
+   currentOnly: show just the current entry (the Leak tab shows the effective result in its own callout). */
+function leakChip(j, currentOnly){
+  const cur = j.leakTest||{status:"not_set"};
+  const eff = currentOnly ? null : effectiveLeak(j);
+  const useEff = !!eff && cur.status!=="completed" && leakResultKind(eff)!=="pass";
+  const lt = useEff ? eff : cur;
   if (lt.status==="completed"){
     const k = leakResultKind(lt); const cls = k==="pass"?"ok":k==="fail"?"bad":"warn";
-    return `<div class="callout ${cls}">${icon(k==="pass"?"droplet":"alert")}<div><b>${esc(lt.result||"Result not recorded")}</b>${k!=="pass"?`<div><b>Not OK —</b> ${k==="fail"?"a leak was found.":"the result needs a re-check."}</div>`:""}<div class="hint">${esc(lt.method||"")}${lt.notes?" — "+esc(lt.notes):""}</div><div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
+    const tagged = k!=="pass" && jobHazards(j).length>0;
+    return `<div class="callout ${cls}">${icon(k==="pass"?"droplet":"alert")}<div><b>${esc(lt.result||"Result not recorded")}</b>${tagged?` <span class="pill bad">Appliance red-tagged</span>`:""}${k!=="pass"?`<div><b>Not OK —</b> ${k==="fail"?"a leak was found.":"the result needs a re-check."}</div>`:""}${useEff?`<div class="hint">Current entry: ${esc(leakSummary(cur))}. The last completed result still counts until a passing re-test is recorded.</div>`:""}<div class="hint">${esc(lt.method||"")}${lt.notes?" — "+esc(lt.notes):""}</div><div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
   }
   if (lt.status==="skipped") return `<div class="callout" style="--c:var(--slate)">${icon("droplet")}<div><b>Skipped</b>${lt.reason?` — ${esc(lt.reason)}`:""}<div class="tiny faint">${esc(lt.by||"")} · ${esc(fmtDate(lt.at))}</div></div></div>`;
   return `<div class="callout ${leakRelevant(j)?"warn":""}">${icon("droplet")}<div><b>Not recorded yet</b><div class="hint">${leakRelevant(j)?"Recommended for this job (gas work or new installation).":"Optional for this job — record it or skip it."}</div></div></div>`;
@@ -2092,7 +2161,7 @@ function jobLeak(j){
   const skipBlocked = leakNotPassed(j) && !jobHazards(j).length;
   const eff = effectiveLeak(j);
   const hist = Array.isArray(j.leakHistory) ? j.leakHistory : [];
-  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. A Fail or Inconclusive result stops the job from closing until a passing re-test is recorded or the appliance is red-tagged.</div></div></div>${leakChip(j)}
+  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. A Fail or Inconclusive result stops the job from closing until a passing re-test is recorded or the appliance is red-tagged.</div></div></div>${leakChip(j, true)}
     ${lt.status!=="completed" && eff && leakNotPassed(j)?`<div class="callout bad mt">${icon("alert","sm")}<div><b>Last completed result: ${esc(eff.result||"not recorded")}</b> (${esc(fmtDate(eff.at))}). It still counts until a passing re-test is recorded${jobHazards(j).length?" — the appliance is red-tagged.":" or the appliance is red-tagged."}</div></div>`:""}
     ${locked && !isClosed(j)?`<div class="callout mt">${icon("lock","sm")}<div>The leak test is locked while the job is in review. A supervisor can send it back if a re-test is needed.</div></div>`:""}
     <div class="actionbar mt" id="a"></div>
@@ -2146,7 +2215,7 @@ function leakSkip(j){
   onSubmit(b, async ()=>{
     const reason = b.reason.value.trim(); if (!reason){ toast("Give a reason for skipping the leak test.","bad"); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))){ closeOverlay(); return; }
-    if (!(await freshHazards())) return;
+    if (!(await freshHazards({noRender:true}))) return;
     if (leakNotPassed(j) && !jobHazards(j).length){ toast(LEAK_SKIP_BLOCKED, "bad"); closeOverlay(); renderMain(); return; }
     const lt = {status:"skipped", reason, at:now(), by:me()?.name||""};
     const patch = leakPatch(j, lt);
@@ -2308,7 +2377,7 @@ function hazardCard(h, j){
       <div><div class="k">Tag attached</div><div class="v">${h.tagAffixed?"Yes":"No"}</div></div>
       <div><div class="k">Occupant notice given</div><div class="v">${h.userNoticeGiven?"Yes":"No"}</div></div>
       <div><div class="k">TSSA notified</div><div class="v">${h.tssaNotified?"Yes":"Not needed / no"}</div></div>
-      <div><div class="k">Written notice due</div><div class="v">${h.writtenNoticeSentAt?(h.writtenNoticeLate?`Sent <span class="pill bad">Sent late</span>`:"Sent"):badDate(due)?`<span style="color:var(--bad)">Date can't be read — treat as overdue</span>`:due?(days<0?`<span style="color:var(--bad)">Overdue ${-days} day(s)</span>`:`${esc(fmtDateOnly(due))} (${days} day(s))`):"After the gas utility is told"}</div></div>
+      <div><div class="k">Written notice due</div><div class="v">${stepOk(h.writtenNoticeSentAt)?(h.writtenNoticeLate?`Sent · <span class="pill bad">late</span>`:"Sent"):badDate(due)?`<span style="color:var(--bad)">Date can't be read — treat as overdue</span>`:due?(days<0?`<span style="color:var(--bad)">Overdue ${-days} day(s)</span>`:`${esc(fmtDateOnly(due))} (${days} day(s))`):"After the gas utility is told"}</div></div>
     </div>
     <h4 class="mt" style="margin-bottom:6px">Steps</h4><div class="stack tight" data-steps></div>
     ${resolved?`<div class="callout ok mt">${icon("check","sm")}<div><b>Removed${h.removedByType==="tssa_inspector"?" by a TSSA inspector":""}:</b> ${esc(h.removedByType==="tssa_inspector" ? (h.removerName||String(h.resolvedBy||"").replace(/^TSSA inspector\s+/i,"")) : (h.resolvedBy||h.removerName||""))} · ${esc(fmtDateOnly(h.resolvedAt))}<div>Corrective action: ${esc(h.correctiveAction||h.resolution||"")}</div>${h.distributorClearNoticeAt?`<div class="hint">Removal notice sent to the gas distributor: ${esc(fmtDate(h.distributorClearNoticeAt))}</div>`:""}</div></div>`:""}
@@ -2324,12 +2393,13 @@ function hazardCard(h, j){
   };
   hazardSteps(h).forEach(st=>{
     const n = HZ_STEPS.indexOf(st)+1;
-    const info = h[st.k] ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}${st.k==="writtenNoticeSentAt" && h.writtenNoticeLate?` <span class="pill bad">Sent late</span>`:""}`
+    const info = stepOk(h[st.k]) ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}${st.k==="writtenNoticeSentAt" && h.writtenNoticeLate?` <span class="pill bad">Sent late</span>`:""}`
+      : h[st.k] ? "Date can't be read — record it again."
       : st.k==="gasShutOffAt" && h.gasShutOff ? "Ticked as shut off when reported, but no time recorded."
       : st.k==="writtenNoticeSentAt" && due ? `Not sent yet — due by ${esc(dueText(due))}` : "Not recorded";
     const row = el(`<div class="note row between wrap"><div><b>${n}. ${esc(st.label)}</b><div class="hint">${info}</div></div></div>`);
     /* The written notice can still be recorded after the job is closed or the tag removed. */
-    const allowed = S.role!=="accountant" && !h[st.k] && (st.k==="writtenNoticeSentAt" || (!resolved && jobOpen));
+    const allowed = S.role!=="accountant" && !stepOk(h[st.k]) && (st.k==="writtenNoticeSentAt" || (!resolved && jobOpen));
     if (allowed){ const b = el(`<button type="button" class="btn sm ${st.k==="writtenNoticeSentAt"?"":"danger"}">${icon("clock","sm")} Record</button>`); b.addEventListener("click", ()=>stepForm(h, st, audit, tagName)); row.appendChild(b); }
     $("[data-steps]", c).appendChild(row);
   });
@@ -2351,7 +2421,7 @@ function stepForm(h, st, audit, tagName){
   onSubmit(b, async ()=>{
     const d = stepTime(b.when, h, st.label); if (!d) return;
     if (!(await freshHazard(h))) return;
-    if (h[st.k]){ toast("This step was already recorded on another device.","bad"); closeOverlay(); render(); return; }
+    if (stepOk(h[st.k])){ toast("This step was already recorded on another device.","bad"); closeOverlay(); render(); return; }
     const p = {[st.k]:d.toISOString(), [st.by]:me()?.name||"", [st.rec]:now()};
     if (st.k==="gasShutOffAt") p.gasShutOff = true;
     if (st.k==="distributorNotifiedAt" && !isImmediate(h) && !h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
@@ -2365,28 +2435,47 @@ function stepForm(h, st, audit, tagName){
   });
 }
 /* Immediate hazard: the tag can't be removed until steps 1–3 are recorded. */
-const immStepsMissing = h=> isImmediate(h) && !HZ_STEPS.slice(0,3).every(st=>!!h[st.k]);
+const immStepsMissing = h=> isImmediate(h) && !HZ_STEPS.slice(0,3).every(st=>stepOk(h[st.k]));
 const IMM_REMOVE_BLOCKED = "Record gas shut off, customer informed and utility told first.";
-/* Input rating in BTU/h: the number field, or else the old text field (e.g. "500,000 BTU/h", "500000", "500 MBH" or "500 kBTU/h" = x1000). null if unknown. */
+/* Input rating in BTU/h: the number field, or else the old text field. null if unknown (never guessed).
+   Text forms read: whole numbers with optional "," or " " thousands separators ("500,000", "500 000", "500000"),
+   with an optional unit: BTU/h (x1), MBH / MBtu/h / kBTU/h / "500K BTU/h" (x1000), MMBtu/h (x1,000,000).
+   Anything with a dot (e.g. "500.000" — 500 or 500,000?) or any other form is unknown.
+   A value under 1,000 BTU/h is not a real gas appliance rating (almost certainly a unit mistake) — unknown. */
+const BTU_MIN = 1000;
+const BTU_NUM = /^(\d{1,3}(?:,\d{3})+|\d{1,3}(?: \d{3})+|\d+)$/;
+function btuhRecorded(e){ return !!e && ((e.inputBtuh!==undefined && e.inputBtuh!==null && String(e.inputBtuh).trim()!=="") || String(e.input??"").trim()!==""); }
 function equipmentBtuh(e){
-  const n = Number(e?.inputBtuh); if (Number.isFinite(n) && n>0) return n;
-  const t = String(e?.input??"").replace(/,/g,"").trim(); if (!t) return null;
-  /* Only these forms are read; anything else counts as unknown (never guessed). */
-  const m = t.match(/^(\d+(?:\.\d+)?)\s*(btu(?:\s*\/?\s*h(?:r|our)?)?|btuh|mbh|mbtu(?:\s*\/?\s*h(?:r|our)?)?|kbtu(?:\s*\/?\s*h(?:r|our)?)?)?$/i); if (!m) return null;
-  const v = Number(m[1]) * (/^(mbh|mbtu|kbtu)/i.test(m[2]||"") ? 1000 : 1);
-  return Number.isFinite(v) && v>0 ? v : null;
+  if (!e) return null;
+  if (e.inputBtuh!==undefined && e.inputBtuh!==null && String(e.inputBtuh).trim()!==""){
+    /* A stored number field that isn't a whole number of at least 1,000 is unreadable — the old text is not used instead. */
+    const n = typeof e.inputBtuh==="number" ? e.inputBtuh : (BTU_NUM.test(String(e.inputBtuh).trim()) ? Number(String(e.inputBtuh).replace(/[, ]/g,"")) : NaN);
+    return Number.isInteger(n) && n>=BTU_MIN ? n : null;
+  }
+  const t = String(e.input??"").trim(); if (!t) return null;
+  const m = t.match(/^(\d{1,3}(?:,\d{3})+|\d{1,3}(?: \d{3})+|\d+)\s*(?:(mmbtu|mm\s*btu|kbtu|k\s*btu|mbtu|btu)(?:\s*\/?\s*h(?:r|our)?)?|(mbh|btuh))?$/i);
+  if (!m) return null;
+  const unit = (m[2]||m[3]||"").toLowerCase().replace(/\s+/g,"");
+  const mult = /^mm/.test(unit) ? 1000000 : /^(mbh|mbtu|kbtu)$/.test(unit) ? 1000 : 1;
+  const v = Number(m[1].replace(/[, ]/g,"")) * mult;
+  return Number.isSafeInteger(v) && v>=BTU_MIN ? v : null;
 }
-/* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h. */
+/* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h.
+   known=false: the rating can't be used (unknownWhy says why). */
 function clearRule(h){
-  /* No equipment on the tag: use the equipment of the job it was raised on. */
-  const e = equipmentById(h.equipmentId) || equipmentById(jobById(h.jobId)?.equipmentId); const btu = equipmentBtuh(e);
+  /* Use the job's equipment only when the tag has no equipment of its own. A tag whose equipment isn't loaded has an unknown rating. */
+  const e = h.equipmentId ? equipmentById(h.equipmentId) : equipmentById(jobById(h.jobId)?.equipmentId);
+  const btu = equipmentBtuh(e);
   const known = btu!==null;
+  const unknownWhy = known ? "" : (h.equipmentId && !e) ? "The equipment on this red tag couldn't be found, so its input rating (BTU/h) can't be checked — check the rating plate."
+    : btuhRecorded(e) ? "The input rating is recorded but can't be read — check the rating plate and correct it on the equipment (whole number of BTU/h)."
+    : "The input rating (BTU/h) is not recorded for this equipment. Add it on the equipment if you know it.";
   const need = known && btu>400000 ? "G1" : "G2";
   const u = me(); let why = "";
   if (!u) why = "Choose who you are first.";
   else if (licOf(u)==="G3") why = "A G3 cannot remove a red tag. A G2 or G1 must verify the repair.";
   else if (!hasLic(u, need)) why = need==="G1" ? "This appliance is over 400,000 BTU/h. Only a G1 can remove this red tag." : "Only a G2 or G1 gas technician can remove a red tag.";
-  return {ok:!why, why, known};
+  return {ok:!why, why, known, unknownWhy};
 }
 function clearForm(h, audit, tagName){
   if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); return; }
@@ -2396,7 +2485,7 @@ function clearForm(h, audit, tagName){
     <div class="field mt"><label>Removed by *</label>
       <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me${rule.ok?"":`<div class="hint">${esc(rule.why)}</div>`}</span></label>
       <label class="check"><input type="radio" name="who" value="inspector" ${rule.ok?"":"checked"}><span>A TSSA inspector</span></label></div>
-    ${rule.known?"":`<div class="callout warn mt">${icon("alert","sm")}<div>The input rating (BTU/h) is not recorded for this equipment, so a G2 or G1 is needed. Add it on the equipment if you know it.</div></div>`}
+    ${rule.known?"":`<div class="callout warn mt">${icon("alert","sm")}<div>${esc(rule.unknownWhy)} Until then a G2 or G1 is needed; if the appliance is over 400,000 BTU/h, only a G1 may remove this red tag.</div></div>`}
     <div class="grid g2 mt" data-me ${rule.ok?"":"hidden"}>
       <div class="field"><label>Your name *</label><input name="rname" value="${esc(u.name||"")}"></div>
       <div class="field"><label>TSSA certificate number *</label><input name="rcert" value="${esc(u.tssaCertNumber||"")}"></div>
@@ -2501,12 +2590,12 @@ function completionItems(j){
   }
   const def = readingDef(j); const req = def.checks.filter(c=>c[2]);
   req.forEach(([k,label])=>{
-    if (k==="leftSafe" && imm.length) items.push({label:"appliance is red-tagged — gas shut off", ok:imm.every(h=>!!h.gasShutOffAt), bad:true, safety:true, tab:"safety", hint:"Record the time the gas was shut off on the red tag."});
+    if (k==="leftSafe" && imm.length) items.push({label:"appliance is red-tagged — gas shut off", ok:imm.every(h=>stepOk(h.gasShutOffAt)), bad:true, safety:true, tab:"safety", hint:"Record the time the gas was shut off on the red tag."});
     else items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:k==="leftSafe" ? leftSafeOk(j) : !!(j.readings||{})[k], safety:k==="leftSafe", tab:"readings", hint:k==="leftSafe" && (j.readings||{}).leftSafe ? "A red tag was removed after this was saved. Confirm it again in Readings." : "Confirm it in Readings."});
   });
-  if (imm.length) items.push({label:"red tag steps 1–3 recorded (gas shut off, customer informed, gas utility told)", ok:imm.every(h=>HZ_STEPS.slice(0,3).every(st=>!!h[st.k])), bad:true, safety:true, tab:"safety", hint:"Record each step with its time on the red tag."});
+  if (imm.length) items.push({label:"red tag steps 1–3 recorded (gas shut off, customer informed, gas utility told)", ok:imm.every(h=>!immStepsMissing(h)), bad:true, safety:true, tab:"safety", hint:"Record each step with its time on the red tag."});
   const other = hz.filter(h=>!isImmediate(h));
-  if (other.length) items.push({label:"red tag: distributor notice time recorded", ok:other.every(h=>h.distributorNotifiedAt), tab:"safety", hint:"Record when the gas distributor was told."});
+  if (other.length) items.push({label:"red tag: distributor notice time recorded", ok:other.every(h=>stepOk(h.distributorNotifiedAt)), tab:"safety", hint:"Record when the gas distributor was told."});
   items.push({label:"help requests answered", ok:s.help.every(h=>h.status==="resolved"), tab:"overview", hint:"Wait for the supervisor's answer."});
   return items;
 }
@@ -2633,8 +2722,15 @@ function equipmentForm(e, presetCustomer){
   onSubmit(b, async ()=>{
     const data = {}; ["manufacturer","model","serial","type","fuel","refrigerant","filterSize","installDate","warrantyUntil","notes"].forEach(k=>data[k]=b[k].value.trim());
     data.siteCustomerId = b.siteCustomerId.value||null;
-    const btuIn = b.inputBtuh.value.replace(/[,\s]/g,"");
-    if (btuIn){ const n = parseNum(btuIn, false); if (n===null || n<=0){ toast("Input rating must be a number of BTU/h, e.g. 60000.","bad"); return; } data.inputBtuh = n; }
+    /* Whole number only ("60000", "60,000" or "60 000"). A dot is refused: "500.000" could mean 500 or 500,000. */
+    const btuIn = b.inputBtuh.value.trim();
+    if (btuIn){
+      if (/[.]/.test(btuIn)){ toast("Input rating must be a whole number of BTU/h — no decimal point. Write 500000 or 500,000 (not 500.000).","bad"); return; }
+      if (!BTU_NUM.test(btuIn)){ toast("Input rating must be a whole number of BTU/h, e.g. 60000 or 60,000.","bad"); return; }
+      const n = Number(btuIn.replace(/[, ]/g,""));
+      if (!Number.isSafeInteger(n) || n<BTU_MIN){ toast("Input rating under 1,000 BTU/h is not a real appliance rating — check the units on the rating plate (BTU/h, not MBH).","bad"); return; }
+      data.inputBtuh = n;
+    }
     else data.inputBtuh = null;
     const missing = [["manufacturer","Manufacturer"],["model","Model"],["serial","Serial number"]].find(([k])=>!data[k]);
     if (missing){ toast(`Enter the ${missing[1].toLowerCase()}.`,"bad"); return; }
@@ -2665,7 +2761,7 @@ function renderEquipmentDetail(id){
     <div><div class="k">Customer</div><div class="v">${c?(isField()||S.role==="accountant"?esc(c.name):`<a href="#" id="cl">${esc(c.name)}</a>`):"—"}</div></div>
     <div><div class="k">Address</div><div class="v">${esc(c?.address||"—")}</div></div>
     <div><div class="k">Age</div><div class="v">${esc(equipmentAge(e))}</div></div>
-    <div><div class="k">Input rating</div><div class="v">${Number(e.inputBtuh)>0?esc(Number(e.inputBtuh).toLocaleString())+" BTU/h":e.input?esc(e.input)+` <span class="hint">(text only — enter the number in Edit)</span>`:"Not recorded"}</div></div>
+    <div><div class="k">Input rating</div><div class="v">${btuhRecorded(e) && equipmentBtuh(e)===null?`${esc(String(e.inputBtuh??e.input??""))} <span class="hint" style="color:var(--bad)">(rating can't be read — check the rating plate)</span>`:Number(e.inputBtuh)>0?esc(Number(e.inputBtuh).toLocaleString())+" BTU/h":e.input?esc(e.input)+` <span class="hint">(text only — enter the number in Edit)</span>`:"Not recorded"}</div></div>
     <div><div class="k">Refrigerant</div><div class="v">${esc(e.refrigerant||"—")}</div></div>
     <div><div class="k">Filter size</div><div class="v mono">${esc(e.filterSize||"—")}</div></div>
     <div><div class="k">Warranty</div><div class="v">${e.warrantyUntil?(ts(e.warrantyUntil)>Date.now()?"Until "+esc(fmtDateOnly(e.warrantyUntil)):"Expired "+esc(fmtDateOnly(e.warrantyUntil))):"—"}</div></div>
@@ -2918,7 +3014,7 @@ function renderReports(){
   const g = el(`<div class="grid g2 mt2"><div class="card"><div class="card-h"><h3>Jobs closed per week</h3><span class="hint">last 8 weeks</span></div><div class="bars">${weeks.map(w=>`<div class="b"><span class="n">${w.n}</span><div class="v" style="height:${w.n/max*100}%"></div><span class="l">${esc(w.l)}</span></div>`).join("")}</div></div>
     <div class="card"><div class="card-h"><h3>Closed jobs by technician</h3></div><div id="bt"></div></div>
     <div class="card"><div class="card-h"><h3>Jobs by type</h3><span class="hint">all time</span></div><div id="ty"></div></div>
-    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>j.leakTest?.status==="completed").length}</div></div><div><div class="k">Leak tests passed</div><div class="v mono">${S.jobs.filter(j=>leakResultKind(j.leakTest)==="pass").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono" style="color:var(--bad)">${S.jobs.filter(j=>leakResultKind(j.leakTest)==="fail").length}</div></div><div><div class="k">Leak tests inconclusive / unknown</div><div class="v mono" style="color:var(--warn)">${S.jobs.filter(j=>["inconclusive","unknown"].includes(leakResultKind(j.leakTest))).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(e=>maintenanceDue(e)?.overdue).length}</div></div></div></div></div>`);
+    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>!!effectiveLeak(j)).length}</div></div><div><div class="k">Leak tests passed</div><div class="v mono">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="pass").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono" style="color:var(--bad)">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="fail").length}</div></div><div><div class="k">Leak tests inconclusive / unknown</div><div class="v mono" style="color:var(--warn)">${S.jobs.filter(j=>["inconclusive","unknown"].includes(leakResultKind(effectiveLeak(j)))).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(e=>maintenanceDue(e)?.overdue).length}</div></div></div></div></div>`);
   const hb = (rows)=>{ const m = Math.max(1, ...rows.map(r=>r[1])); return rows.length ? rows.map(([l,n])=>`<div class="hbar"><span>${esc(l)}</span><div class="track"><div style="width:${n/m*100}%"></div></div><span class="mono">${n}</span></div>`).join("") : `<div class="hint">No data yet.</div>`; };
   $("#bt", g).innerHTML = hb(fieldUsers().map(u=>[u.name, closed.filter(j=>j.technicianId===u.id).length]).sort((a,b)=>b[1]-a[1]));
   $("#ty", g).innerHTML = hb(JOB_TYPES.map(t=>[cap(t), S.jobs.filter(j=>j.jobType===t).length]).filter(r=>r[1]>0).sort((a,b)=>b[1]-a[1]));
@@ -2981,7 +3077,7 @@ function skillStats(u){
   const jobs = S.jobs.filter(j=>j.technicianId===u.id); const closed = jobs.filter(isClosed);
   const s = jobs.map(j=>sub(j.id));
   return {closed:closed.length, byType:JOB_TYPES.map(t=>[cap(t), closed.filter(j=>j.jobType===t).length]).filter(r=>r[1]),
-    readings:jobs.filter(j=>j.readings && Object.keys(j.readings).length>2).length,
+    readings:jobs.filter(j=>j.readings && Object.keys(j.readings).some(k=>!READING_META.has(k))).length,
     leak:jobs.filter(j=>j.leakTest?.status==="completed").length, help:s.reduce((n,x)=>n+x.help.length,0),
     sentBack:jobs.reduce((n,j)=>n+(j.sendBacks||0),0), firstPass:closed.filter(j=>!(j.sendBacks>0)).length};
 }
