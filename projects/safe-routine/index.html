@@ -296,6 +296,7 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 body:has(#overlays .overlay) #toasts{top:18px; bottom:auto}
 #setup{position:fixed; inset:0; z-index:150; background:var(--bg); overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:24px 16px}
 #setup .setupcard{width:min(560px,100%); margin-top:6vh}
+#setup .mf{display:flex; gap:8px; flex-wrap:wrap}
 /* The safety banner stays visible above the first-start / setup screen. */
 body:has(#setup) #banner{position:fixed; top:0; left:0; right:0; z-index:151}
 body:has(#setup) #setup{padding-top:calc(var(--banner-h,0px) + 24px)}
@@ -530,13 +531,19 @@ function lsRemove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function toLocalInput(iso){ const d = iso?new Date(iso):new Date(); const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function mapsUrl(addr){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr||""); }
 /* At most 2 toasts show at once, so they never cover much of the page. Success toasts go away sooner.
-   Error toasts come first: they are kept after (in front of) success toasts, and an older success toast goes first when there are too many. */
+   Error toasts come first: they are kept after (in front of) success toasts, and an older success toast goes first when there are too many.
+   Each toast gets a number in the order shown (_at). onSubmit / withBusy note the last number when an action starts (ACTION_START). */
 const MAX_TOASTS = 2;
+let TOAST_N = 0, ACTION_START = 0;
+const markActionStart = ()=>{ ACTION_START = TOAST_N; };
 function toast(msg, kind){
   const t = el(`<div class="toast ${kind||""}">${icon(kind==="bad"?"alert":"check","sm")}<span>${esc(msg)}</span></div>`);
-  const box = $("#toasts"); t._at = Date.now();
-  /* A success (e.g. after a form was saved and closed) clears error toasts older than 1 s — they belonged to earlier tries. */
-  if (kind!=="bad") $$(".toast.bad", box).forEach(x=>{ if (Date.now()-(x._at||0) > 1000) x.remove(); });
+  const box = $("#toasts"); t._at = ++TOAST_N;
+  /* The same message already showing (e.g. a retry with the same mistake) is replaced, not shown twice. */
+  $$(".toast", box).forEach(x=>{ if (x.classList.contains("bad")===(kind==="bad") && x.textContent===t.textContent) x.remove(); });
+  /* A success (e.g. after a form was saved and closed) clears only error toasts shown BEFORE the current action started —
+     they belonged to earlier tries. Errors from this action (e.g. "Saved, but … couldn't be recorded") stay. */
+  if (kind!=="bad") $$(".toast.bad", box).forEach(x=>{ if ((x._at||0) <= ACTION_START) x.remove(); });
   if (kind==="bad") box.appendChild(t); else box.insertBefore(t, $(".toast.bad", box));
   setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
   /* Never remove the toast just added: drop an older success toast first, else the oldest error. */
@@ -588,6 +595,7 @@ function withBusy(btns, fn){
   const list = (Array.isArray(btns) ? btns : [btns]).filter(Boolean);
   return async (...a)=>{
     if (!list.length || list[0].dataset.busy) return;
+    markActionStart();
     list.forEach(b=>{ b.dataset.busy = "1"; b.disabled = true; });
     try{ return await fn(...a); }
     catch(e){ console.error(e); toast("Something went wrong. Check the result before trying again.", "bad"); }
@@ -600,6 +608,7 @@ function onSubmit(form, fn){
   form.addEventListener("submit", async e=>{
     e.preventDefault();
     if (form.dataset.busy) return;
+    markActionStart();
     const btns = $$("button:not([type=button])", form);
     /* A date/time the browser can't read (half typed) would otherwise be saved as empty. Number fields check this themselves. */
     const bad = $$("input:not([type=number])", form).find(x=>!x.disabled && !x.closest("[hidden]") && x.validity && x.validity.badInput);
@@ -925,6 +934,19 @@ const customerById = id=> S.customers.find(c=>c.id===id);
 const equipmentById = id=> S.equipment.find(e=>e.id===id);
 const jobById = id=> S.jobs.find(j=>j.id===id);
 function me(){ return userById(S.userId) || null; }
+/* Re-read a user's record (default: the current user) in place, so a licence lowered or an account turned off on another
+   device is seen before a licence-gated action. true = read (or no user to read); false (with a toast) = stop. */
+async function freshMe(u){
+  u = u || me(); if (!u) return true;
+  let snap;
+  try{ snap = await db.doc("users/"+u.id).get(); }
+  catch(e){ console.error(e); toast("Couldn't check your latest licence. Try again.","bad"); return false; }
+  if (!snap || !snap.exists){ toast("Your user record no longer exists. Choose who you are again.","bad"); return false; }
+  const data = snap.data() || {};
+  const id = u.id; Object.keys(u).forEach(k=>{ if (k!=="id") delete u[k]; }); Object.assign(u, data, {id}); normalizeUser(u);
+  return true;
+}
+const OFF_MSG = "Your account is turned off. Choose who you are again.";
 const fieldRoles = ["technician","apprentice"];
 const isField = ()=> fieldRoles.includes(S.role);
 const activeUsers = ()=> S.users.filter(u=>u.active!==false);
@@ -1847,6 +1869,9 @@ async function approveJob(j){
       if (!(await freshJob(j, ["completion_review"]))) return null;
       if (!(await loadJobSub(j.id))){ toast("Couldn't check the latest job details. Try again.", "bad"); return null; }
       if (!(await freshHazards({noRender:true}))) return null;
+      /* Re-read the approver: the licence may have been lowered (or the account turned off) on another device. */
+      if (!(await freshMe(approver))) return null;
+      if (approver.active===false){ toast(OFF_MSG, "bad"); render(); return null; }
       const self = workedOnJob(j, approver.id);
       if (self && !hasLic(approver, "G2")){ toast(SELF_APPROVE_MSG, "bad"); render(); return null; }
       const items = completionItems(j);
@@ -1954,9 +1979,13 @@ function openJobForm(j){
   showModal(b, {wide:true});
   const f = b;
   function fillEquip(){
-    const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid || e.id===j?.equipmentId);
+    const cid = f.customerId.value;
+    /* The job's current equipment stays listed and chosen only for the job's own customer or the customer it belongs to;
+       for any other customer "None" is chosen. */
+    const keepCur = e=> e.id===j?.equipmentId && (cid===j.customerId || e.siteCustomerId===cid);
+    const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid || keepCur(e));
     /* The placeholder for an equipment id that isn't loaded only belongs to the job's own customer. */
-    f.equipmentId.innerHTML = `<option value="">None</option>`+(j?.equipmentId && !equipmentById(j.equipmentId) && cid===j.customerId?unknownOpt(j.equipmentId):"")+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
+    f.equipmentId.innerHTML = `<option value="">None</option>`+(j?.equipmentId && !equipmentById(j.equipmentId) && cid===j.customerId?unknownOpt(j.equipmentId):"")+list.map(e=>`<option value="${esc(e.id)}" ${keepCur(e)?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
   }
   function warn(){
     const w = techWarnings(f.technicianId.value, f.scheduledAt.value?new Date(f.scheduledAt.value).toISOString():now(), f.requiredTrade.value, j?.id);
@@ -2121,7 +2150,7 @@ function jobReadings(j, s){
     const isEmpty = !def.fields.some(([k])=>out[k]!==undefined) && !def.checks.some(([k])=>out[k]);
     if (isEmpty && !hadAny){ toast("Enter at least one reading.","bad"); return; }
     const bad = def.fields.filter(([k])=> out[k]!==undefined && parseNum(out[k], NEG_OK_READINGS.has(k))===null);
-    if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
+    if (bad.length){ fieldErr(form[bad[0][0]], `“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
     if (!(await freshHazards({noRender:true}))) return;
     /* A red tag was removed (here or on another device) since the form was drawn: the tick must be given again.
@@ -2637,6 +2666,7 @@ function clearRule(h){
   const need = known && btu>400000 ? "G1" : "G2";
   const u = me(); let why = "";
   if (!u) why = "Choose who you are first.";
+  else if (u.active===false) why = "Your account is turned off.";
   else if (licOf(u)==="G3") why = "A G3 cannot remove a red tag. A G2 or G1 must verify the repair.";
   else if (!hasLic(u, need)) why = need==="G1" ? "This appliance is over 400,000 BTU/h. Only a G1 can remove this red tag." : "Only a G2 or G1 gas technician can remove a red tag.";
   return {ok:!why, why, known, unknownWhy};
@@ -2647,8 +2677,9 @@ async function clearForm(h, audit, tagName){
   /* Opened after a re-read: if another window opened or the page changed meanwhile, don't open the form on top of it. */
   const viewKey = ()=> [S.view.tab, S.view.jobId, S.view.jobTab, S.view.equipmentId].join("|");
   const ov0 = $("#overlays").lastElementChild, view0 = viewKey();
-  /* Re-read the equipment first: its rating decides who may remove the tag. */
+  /* Re-read the equipment and the current user first: the rating and the licence decide who may remove the tag. */
   if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
+  if (!(await freshMe())) return;
   if ($("#overlays").lastElementChild!==ov0 || viewKey()!==view0) return;
   const rule = clearRule(h); const u = me()||{};
   let eqSeen = !!equipmentById(ruleEquipmentId(h));
@@ -2672,7 +2703,8 @@ async function clearForm(h, audit, tagName){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn go">${icon("check","sm")} Remove red tag</button></div></form>`);
   showModal(b, {wide:true});
   const sync = ()=>{ const w = b.who.value; $("[data-me]", b).hidden = w!=="me"; $("[data-in]", b).hidden = w!=="inspector"; };
-  $$("input[name=who]", b).forEach(x=>x.addEventListener("change", sync));
+  /* Once a choice is picked, the "you can no longer remove it yourself" box has done its job. */
+  $$("input[name=who]", b).forEach(x=>x.addEventListener("change", ()=>{ $("[data-meoff]", b).hidden = true; sync(); }));
   /* After a refusal: redraw "Me" (allowed or not, and why) and the rating warning from the latest record.
      If "Me" was chosen and is no longer allowed, nothing is chosen for the user: both choices and the inspector name are
      cleared, so they must pick who removed it and type the name again. Returns that message, or "". */
@@ -2680,7 +2712,7 @@ async function clearForm(h, audit, tagName){
     const r = clearRule(h), meIn = $("input[name=who][value=me]", b), why = $("[data-mewhy]", b), off = $("[data-meoff]", b);
     let msg = "";
     if (!r.ok && meIn.checked){
-      msg = `You can no longer remove this red tag yourself (${/Only a G1/.test(r.why) ? "now G1 only" : "your licence or the rating changed"}). Choose who removed it.`;
+      msg = !me() ? r.why : `You can no longer remove this red tag yourself. ${r.why} Choose who removed it.`;
       $$("input[name=who]", b).forEach(x=>x.checked = false); b.inspector.value = "";
       $("[data-meofftext]", off).textContent = msg; off.hidden = false;
     }
@@ -2696,6 +2728,8 @@ async function clearForm(h, audit, tagName){
     let removerName, removerAddress = "", removerTssaCert = "";
     /* Re-read the equipment again: the rating may have been changed on another device while this form was open. */
     if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
+    /* Re-read the current user too: the licence may have been lowered (or the account turned off) on another device. */
+    if (!(await freshMe())) return;
     const rcNow = ratingChangesSince(h).length, eqNow = !!equipmentById(ruleEquipmentId(h));
     if (eqSeen && !eqNow){ eqSeen = false; rcSeen = rcNow; const off = redraw(); if (off) toast(off,"bad"); toast("The appliance record couldn't be found (it may have been deleted on another device). Check the rating plate, then press Remove again.","bad"); return; }
     if (rcNow!==rcSeen){ rcSeen = rcNow; eqSeen = eqNow; toast(redraw() || "The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
@@ -2743,7 +2777,10 @@ function hazardForm(j){
   const sync = ()=>{ const imm = b.level.value==="immediate"; $$("[data-notimm]", b).forEach(n=>n.hidden = imm); $$("[data-imm]", b).forEach(n=>n.hidden = !imm); };
   b.level.addEventListener("change", sync); sync();
   onSubmit(b, async ()=>{
-    if (!hasLic(me(), "G3")){ toast("Only a licensed gas technician (G3 or higher) can red-tag.","bad"); return; }
+    /* Re-read the current user: the licence may have been lowered (or the account turned off) on another device. */
+    if (!(await freshMe())) return;
+    if (me()?.active===false){ toast(OFF_MSG,"bad"); return; }
+    if (!hasLic(me(), "G3")){ toast("Only a licensed gas technician (G3 or higher) can red-tag.","bad"); render(); return; }
     const description = b.description.value.trim(); if (!description){ fieldErr(b.description, "Describe what you found."); return; }
     const imm = b.level.value==="immediate";
     let notified = null;
@@ -3079,9 +3116,9 @@ function qrConsentForm(e){
   }));
   yesBtn.addEventListener("click", withBusy([yesBtn, noBtn], async ()=>{
     const name = $("#nm", b).value.trim();
-    if (!name) return toast("Type the homeowner's full name.","bad");
-    if (!inked) return toast("The homeowner needs to sign in the box.","bad");
-    if (!$("#ag", b).checked) return toast("Tick the box to confirm.","bad");
+    if (!name) return fieldErr($("#nm", b), "Type the homeowner's full name.");
+    if (!inked) return fieldErr(cv, "The homeowner needs to sign in the box.");
+    if (!$("#ag", b).checked) return fieldErr($("#ag", b), "Tick the box to confirm.");
     if (!(await saveQr(e, {qrStatus:"active", qrToken:newToken(), qrConsent:{result:"approved", method:"Signature", policyVersion:QR_CONSENT_VERSION, signedName:name, signatureImage:cv.toDataURL("image/png"), at:now(), requestedBy:me()?.name||""}}, {method:"Signature", result:"approved", signedName:name}))) return;
     closeOverlay(); toast("Signed. The QR is now active."); render();
   }));
@@ -3357,13 +3394,14 @@ function renderSettings(){
   const box = $("#b", wrap);
   if (t==="company"){
     const f = el(`<form class="card" style="max-width:640px"><div class="stack">
-      <div class="field"><label>Company name</label><input name="companyName" value="${esc(S.config.companyName)}"></div>
+      <div class="field"><label>Company name *</label><input name="companyName" value="${esc(S.config.companyName)}"></div>
       <div class="field"><label>Main trade (sets colours and the default readings)</label><select name="activeTheme">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${S.config.activeTheme===k?"selected":""}>${v.label}</option>`).join("")}</select></div>
       <div class="field"><label>Default display</label><select name="theme"><option value="system" ${S.config.theme==="system"?"selected":""}>Match device</option><option value="light" ${S.config.theme==="light"?"selected":""}>Light</option><option value="dark" ${S.config.theme==="dark"?"selected":""}>Dark</option></select></div>
       <div class="hint">Each person can still switch light/dark for themselves with the button at the top.</div>
       <div class="mf" style="margin-top:4px"><button class="btn primary">Save</button></div></div></form>`);
     onSubmit(f, async ()=>{
       const next = {companyName:f.companyName.value.trim(), activeTheme:f.activeTheme.value, theme:f.theme.value};
+      if (!next.companyName){ fieldErr(f.companyName, "Enter the company name."); return; }
       const patch = {}; Object.keys(next).forEach(k=>{ if (S.config[k]!==next[k]) patch[k] = next[k]; });
       const trades = Array.isArray(S.config.trades) ? S.config.trades : [];
       if (!trades.includes(next.activeTheme)) patch.trades = trades.concat(next.activeTheme);
