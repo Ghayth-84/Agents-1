@@ -47,6 +47,8 @@ Where the rule came from:
 | R14 | If the appliance input rating is not recorded, G2 or G1 may remove the tag; G3 cannot | Owner (from answer) | O.Reg 215/01 | | Not checked | |
 | R15 | A red tag that is NOT an immediate hazard needs only: utility told + written notice within 14 days | Owner (from answer) | O.Reg 212/01 | | Not checked | |
 | R16 | "Removed by a TSSA inspector" option — who may record it and what ID is needed | Open | O.Reg 212/01 | | **Not decided** | **Owner asked: re-ask before publishing.** For now: any user except accountant, name only (a known way around R8) |
+| R17 | Who may change an appliance's input rating (BTU/hr) while it has an open red tag | Open | O.Reg 215/01 | | **Not decided** | **Owner asked: ask later.** For now anyone except accountant can change it — a known way around R9 (G1-only) |
+| R18 | Who may remove a red tag when the rating is written but can't be read clearly (e.g. "450.5 MBH") | Open | O.Reg 215/01 | | **Not decided** | **Owner asked: ask later.** For now: treated as unknown → G2 or G1 with a warning |
 
 ## Leak test
 
@@ -76,6 +78,8 @@ Where the rule came from:
 ## Before publishing — Claude must ask the owner again
 - [ ] R13: check the code requirement for removing a red tag only after steps R1–R3.
 - [ ] R16: decide the "TSSA inspector" removal option.
+- [ ] R17: decide who may change the BTU rating while a red tag is open.
+- [ ] R18: decide removal when the BTU rating can't be read clearly.
 - [ ] Every rule above is Approved.
 - [ ] Known prototype limit: "Viewing as" lets anyone pick any user (even a G1), so licence rules are not real security until real login is added.
 
