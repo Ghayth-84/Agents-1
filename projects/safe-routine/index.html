@@ -530,14 +530,17 @@ function lsRemove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function toLocalInput(iso){ const d = iso?new Date(iso):new Date(); const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function mapsUrl(addr){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr||""); }
 /* At most 2 toasts show at once, so they never cover much of the page. Success toasts go away sooner.
-   Error toasts come first: they are kept after (in front of) success toasts, and a success toast never pushes one out. */
+   Error toasts come first: they are kept after (in front of) success toasts, and an older success toast goes first when there are too many. */
 const MAX_TOASTS = 2;
 function toast(msg, kind){
   const t = el(`<div class="toast ${kind||""}">${icon(kind==="bad"?"alert":"check","sm")}<span>${esc(msg)}</span></div>`);
-  const box = $("#toasts");
+  const box = $("#toasts"); t._at = Date.now();
+  /* A success (e.g. after a form was saved and closed) clears error toasts older than 1 s — they belonged to earlier tries. */
+  if (kind!=="bad") $$(".toast.bad", box).forEach(x=>{ if (Date.now()-(x._at||0) > 1000) x.remove(); });
   if (kind==="bad") box.appendChild(t); else box.insertBefore(t, $(".toast.bad", box));
   setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
-  while (box.children.length > MAX_TOASTS) ($(".toast:not(.bad)", box) || box.firstElementChild).remove();
+  /* Never remove the toast just added: drop an older success toast first, else the oldest error. */
+  while (box.children.length > MAX_TOASTS) ([...box.children].find(x=>x!==t && !x.classList.contains("bad")) || [...box.children].find(x=>x!==t)).remove();
 }
 /* Form validation error: show it, then scroll the field into view and focus it (so it isn't hidden on a phone). */
 function fieldErr(input, msg){
@@ -591,11 +594,16 @@ function withBusy(btns, fn){
     finally{ list.forEach(b=>{ delete b.dataset.busy; b.disabled = false; }); }
   };
 }
+/* App forms skip the browser's own validation bubbles: every submit handler checks its fields itself and shows the app message. */
 function onSubmit(form, fn){
+  form.noValidate = true;
   form.addEventListener("submit", async e=>{
     e.preventDefault();
     if (form.dataset.busy) return;
     const btns = $$("button:not([type=button])", form);
+    /* A date/time the browser can't read (half typed) would otherwise be saved as empty. Number fields check this themselves. */
+    const bad = $$("input:not([type=number])", form).find(x=>!x.disabled && !x.closest("[hidden]") && x.validity && x.validity.badInput);
+    if (bad){ const l = bad.closest(".field")?.querySelector("label")?.textContent.replace(/\s*\*\s*$/,"") || "A date"; fieldErr(bad, `${l}: this entry is not complete. Finish it or clear it.`); return; }
     form.dataset.busy = "1"; btns.forEach(b=>b.disabled = true);
     try{ await fn(e); }
     catch(err){ console.error(err); toast("Something went wrong. Check the result before trying again.", "bad"); }
@@ -703,8 +711,9 @@ function setupStopHtml(msg, pick){
 /* "Pick a person" on the blocked screen: forget the blocked marker and show the person picker.
    (Prototype: the picker is accepted on this device only — there is no real login yet.) */
 async function pickFromBlocked(wrap){
+  /* If the team list can't be read, stay on this screen (and keep the blocked marker). */
+  if (!(await loadAll()) || (S.loadErrors||[]).includes("users")){ toast("Couldn't load the team list. Check the connection and try again.", "bad"); return; }
   lsRemove(SETUP_BLOCKED_KEY);
-  await loadAll();
   wrap.remove();
   S.userId = null; S.role = "technician"; S.ui.pickMsg = "Pick who is using this device."; render();
 }
@@ -1294,7 +1303,7 @@ function promptBox(title, msg, okLabel){
     ov.addEventListener("click", e=>{ if (e.target===ov) finish(null); });
     $$("[data-close]", b).forEach(x=>x.addEventListener("click", ()=>finish(null)));
     $("[data-no]", b).addEventListener("click", ()=>finish(null));
-    b.addEventListener("submit", e=>{ e.preventDefault(); const v = b.r.value.trim(); if (!v){ fieldErr(b.r, "Give a reason."); return; } finish(v); });
+    b.noValidate = true; b.addEventListener("submit", e=>{ e.preventDefault(); const v = b.r.value.trim(); if (!v){ fieldErr(b.r, "Give a reason."); return; } finish(v); });
     $("#overlays").appendChild(ov);
     setTimeout(()=>b.r.focus(), 20);
   });
@@ -1825,7 +1834,7 @@ function workedOnJob(j, userId){
   return (s.events||[]).some(e=>e.byId===userId && (FIELD_EVENTS.has(e.type) || (e.type==="status" && e.status==="completion_review")));
 }
 const SELF_APPROVE_MSG = "Only a G2 or G1 can approve a job they worked on. Another supervisor (G2 or higher) must approve.";
-const SELF_APPROVE_SHORT = "Another G2+ must approve (you worked on this job)";
+const SELF_APPROVE_SHORT = "Another G2+ must approve";
 /* The person viewing worked on this job and isn't G2/G1: the Approve button is not shown (approveJob still checks). */
 const cantSelfApprove = j=>{ const u = me(); return !!u && workedOnJob(j, u.id) && !hasLic(u, "G2"); };
 async function approveJob(j){
@@ -1919,10 +1928,11 @@ function openJobForm(j){
   const tagLock = j=> openHazards(h=>h.jobId===j.id || (!!j.equipmentId && h.equipmentId===j.equipmentId)).length>0;
   const eqLocked = inReview || (editing && tagLock(j));
   const lockWhy = inReview ? "Locked while waiting for review." : "Locked: this job or its equipment has an open red tag.";
-  const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
   const curTech = j?.technicianId && !fieldUsers().some(u=>u.id===j.technicianId) ? userById(j.technicianId) : null;
   /* A technician or equipment id that isn't loaded keeps a placeholder, so an unrelated edit doesn't unassign / unlink it. */
   const unknownOpt = id=> `<option value="${esc(id)}" selected>(unknown — ${esc(id)})</option>`;
+  /* A customer that isn't loaded keeps a placeholder too, so the address can still be corrected (even while the customer is locked). */
+  const custOpts = (j?.customerId && !customerById(j.customerId) ? unknownOpt(j.customerId) : "")+S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
   const techOpts = `<option value="">Unassigned</option>`+(curTech?`<option value="${esc(curTech.id)}" selected>${esc(userLabel(curTech))}</option>`:j?.technicianId && !userById(j.technicianId)?unknownOpt(j.technicianId):"")+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
@@ -1960,10 +1970,15 @@ function openJobForm(j){
   });
   ["technicianId","scheduledAt","requiredTrade"].forEach(n=> f[n].addEventListener("change", warn));
   fillEquip(); warn();
+  /* Values when the form was opened. On save only the fields the user changed are written, so a stale form
+     doesn't undo changes made on another device meanwhile. (Time is compared at minute precision, as the form shows it.) */
+  const FIELDS = ["customerId","siteAddress","scheduledAt","technicianId","requiredTrade","jobType","priority","equipmentId"];
+  const formVal = k=> k==="siteAddress" ? f.siteAddress.value.trim() : f[k].value;
+  const open0 = {}; FIELDS.forEach(k=> open0[k] = formVal(k));
   onSubmit(b, async ()=>{
     let customerId = f.customerId.value;
     const siteAddress = f.siteAddress.value.trim();
-    if (!customerId){ fieldErr(f.customerId, "Choose a customer."); return; }
+    if (!customerId && !f.customerId.disabled){ fieldErr(f.customerId, "Choose a customer."); return; }
     if (!siteAddress){ fieldErr(f.siteAddress, "Enter the service address."); return; }
     const when = validDate(f.scheduledAt.value); if (!when){ fieldErr(f.scheduledAt, "Enter a valid date and time."); return; }
     if (customerId==="__new"){
@@ -1975,16 +1990,24 @@ function openJobForm(j){
       f.customerId.insertBefore(el(`<option value="${esc(customerId)}">${esc(name)}</option>`), f.customerId.lastElementChild);
       f.customerId.value = customerId; $$(".newc", b).forEach(n=>n.hidden=true);
     }
-    const data = {customerId, siteAddress, scheduledAt:when.toISOString(), technicianId:f.technicianId.value||null,
+    const all = {customerId, siteAddress, scheduledAt:when.toISOString(), technicianId:f.technicianId.value||null,
       requiredTrade:f.requiredTrade.value, jobType:f.jobType.value, priority:f.priority.value, equipmentId:f.equipmentId.value||null};
     if (editing){
-      /* Trailing spaces in old data don't count as an address change. */
-      if (String(j.siteAddress??"").trim()===siteAddress) data.siteAddress = j.siteAddress;
-      const changes = Object.keys(data).filter(k=>String(j[k]??"")!==String(data[k]??""));
-      if (!changes.length){ closeOverlay(); return; }
+      const touched = FIELDS.filter(k=> formVal(k)!==open0[k]);
+      if (!touched.length){ closeOverlay(); return; }
       if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
-      if (String(j.siteAddress??"").trim()===siteAddress) data.siteAddress = j.siteAddress;
-      const changed = k=> String(j[k]??"")!==String(data[k]??"");
+      /* The address was edited here, and also changed on another device since the form was opened: don't replace it silently. */
+      const dbAddr = String(j.siteAddress??"").trim();
+      if (touched.includes("siteAddress") && dbAddr!==open0.siteAddress && dbAddr!==siteAddress){
+        open0.siteAddress = dbAddr;
+        fieldErr(f.siteAddress, `The address was changed on another device to ${dbAddr||"(empty)"}. Save again to replace it.`); return;
+      }
+      /* Same value as stored (trailing spaces, or the same minute) is not a change. */
+      const same = k=> k==="siteAddress" ? dbAddr===siteAddress : k==="scheduledAt" ? !!j.scheduledAt && toLocalInput(j.scheduledAt)===f.scheduledAt.value : String(j[k]??"")===String(all[k]??"");
+      const data = {}; touched.filter(k=>!same(k)).forEach(k=> data[k] = all[k]);
+      const changes = Object.keys(data);
+      if (!changes.length){ closeOverlay(); render(); return; }
+      const changed = k=> changes.includes(k);
       if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
       if (changed("equipmentId") || changed("customerId")){
         const what = changed("equipmentId") ? "equipment" : "customer";
@@ -2005,13 +2028,13 @@ function openJobForm(j){
       }
       const otherChanges = changes.filter(k=>k!=="siteAddress");
       if (otherChanges.length) await logEvent(j.id, "edited", {note:"Changed: "+otherChanges.map(k=>({customerId:"customer",siteAddress:"address",scheduledAt:"time",technicianId:"technician",requiredTrade:"trade",jobType:"type",priority:"priority",equipmentId:"equipment"}[k])).join(", ")});
-      if (data.technicianId && data.technicianId!==prevTech) await notify(`You've been assigned ${j.refNumber} (${fmtDate(j.scheduledAt)}).`, {toUser:data.technicianId, jobId:j.id});
-      else if (data.technicianId && changes.includes("scheduledAt")) await notify(`${j.refNumber} was moved to ${fmtDate(j.scheduledAt)}.`, {toUser:data.technicianId, jobId:j.id});
+      if (changed("technicianId") && j.technicianId && j.technicianId!==prevTech) await notify(`You've been assigned ${j.refNumber} (${fmtDate(j.scheduledAt)}).`, {toUser:j.technicianId, jobId:j.id});
+      else if (j.technicianId && changed("scheduledAt")) await notify(`${j.refNumber} was moved to ${fmtDate(j.scheduledAt)}.`, {toUser:j.technicianId, jobId:j.id});
       closeOverlay(); toast("Job updated."); render(); return;
     }
     const id = uid("job");
     const ref = await uniqueRef(f.refNumber.value.trim()); if (!ref) return;
-    const job = Object.assign({refNumber:ref, status:"assigned", leakTest:{status:"not_set"}, createdAt:now(), createdBy:me()?.name||ROLE_LABELS[S.role]}, data);
+    const job = Object.assign({refNumber:ref, status:"assigned", leakTest:{status:"not_set"}, createdAt:now(), createdBy:me()?.name||ROLE_LABELS[S.role]}, all);
     if (!(await writeDoc("jobs/"+id, job))) return;
     S.jobs.push(Object.assign({id}, job)); S.jobSub[id] = emptySub();
     await logEvent(id, "created", {note:job.technicianId?`Assigned to ${userById(job.technicianId)?.name}`:"Waiting for a technician"});
@@ -2402,6 +2425,8 @@ function materialForm(j){
     if (qty===null || b.qty.validity.badInput){ fieldErr(b.qty, "Quantity must be a number, 0 or more."); return; }
     if (b.unitCost.validity.badInput){ fieldErr(b.unitCost, "Unit cost must be a number, 0 or more."); return; }
     if (unitCost===null){ fieldErr(b.unitCost, "Unit cost must be a number, 0 or more."); return; }
+    if (b.qty.validity.stepMismatch){ fieldErr(b.qty, "Quantity: use at most 2 decimal places."); return; }
+    if (b.unitCost.validity.stepMismatch){ fieldErr(b.unitCost, "Unit cost: use at most 2 decimal places (cents)."); return; }
     const file = b.receipt.files[0]; let up = {url:null, assetId:null};
     if (file){ up = await uploadFile(file); if (!up) return; }
     const rec = {description, qty, unitCost, source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, receiptType:file?String(file.type||""):null, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
@@ -2620,7 +2645,7 @@ const unkHtml = r=> r.known ? "" : `<div class="callout warn mt">${icon("alert",
 async function clearForm(h, audit, tagName){
   if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); return; }
   /* Opened after a re-read: if another window opened or the page changed meanwhile, don't open the form on top of it. */
-  const viewKey = ()=> [S.view.tab, S.view.jobId, S.view.equipmentId].join("|");
+  const viewKey = ()=> [S.view.tab, S.view.jobId, S.view.jobTab, S.view.equipmentId].join("|");
   const ov0 = $("#overlays").lastElementChild, view0 = viewKey();
   /* Re-read the equipment first: its rating decides who may remove the tag. */
   if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
@@ -2634,6 +2659,7 @@ async function clearForm(h, audit, tagName){
     <div class="field mt"><label>Removed by *</label>
       <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me<div class="hint" data-mewhy ${rule.ok?"hidden":""}>${esc(rule.why)}</div></span></label>
       <label class="check"><input type="radio" name="who" value="inspector" ${rule.ok?"":"checked"}><span>A TSSA inspector</span></label></div>
+    <div class="callout bad mt" data-meoff hidden>${icon("alert","sm")}<div data-meofftext></div></div>
     <div data-rc>${rcHtml()}</div>
     <div data-unk>${unkHtml(rule)}</div>
     <div class="grid g2 mt" data-me ${rule.ok?"":"hidden"}>
@@ -2647,12 +2673,21 @@ async function clearForm(h, audit, tagName){
   showModal(b, {wide:true});
   const sync = ()=>{ const w = b.who.value; $("[data-me]", b).hidden = w!=="me"; $("[data-in]", b).hidden = w!=="inspector"; };
   $$("input[name=who]", b).forEach(x=>x.addEventListener("change", sync));
-  /* After a refusal: redraw "Me" (allowed or not, and why) and the rating warning from the latest record. */
+  /* After a refusal: redraw "Me" (allowed or not, and why) and the rating warning from the latest record.
+     If "Me" was chosen and is no longer allowed, nothing is chosen for the user: both choices and the inspector name are
+     cleared, so they must pick who removed it and type the name again. Returns that message, or "". */
   const redraw = ()=>{
-    const r = clearRule(h), meIn = $("input[name=who][value=me]", b), why = $("[data-mewhy]", b);
+    const r = clearRule(h), meIn = $("input[name=who][value=me]", b), why = $("[data-mewhy]", b), off = $("[data-meoff]", b);
+    let msg = "";
+    if (!r.ok && meIn.checked){
+      msg = `You can no longer remove this red tag yourself (${/Only a G1/.test(r.why) ? "now G1 only" : "your licence or the rating changed"}). Choose who removed it.`;
+      $$("input[name=who]", b).forEach(x=>x.checked = false); b.inspector.value = "";
+      $("[data-meofftext]", off).textContent = msg; off.hidden = false;
+    }
+    if (r.ok) off.hidden = true;
     meIn.disabled = !r.ok; why.hidden = r.ok; why.textContent = r.why;
-    if (!r.ok && meIn.checked) $("input[name=who][value=inspector]", b).checked = true;
     $("[data-unk]", b).innerHTML = unkHtml(r); $("[data-rc]", b).innerHTML = rcHtml(); sync();
+    return msg;
   };
   onSubmit(b, async ()=>{
     const action = b.fixText.value.trim(); if (!action){ fieldErr(b.fixText, "Write the corrective action first."); return; }
@@ -2662,10 +2697,11 @@ async function clearForm(h, audit, tagName){
     /* Re-read the equipment again: the rating may have been changed on another device while this form was open. */
     if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
     const rcNow = ratingChangesSince(h).length, eqNow = !!equipmentById(ruleEquipmentId(h));
-    if (eqSeen && !eqNow){ eqSeen = false; rcSeen = rcNow; redraw(); toast("The appliance record couldn't be found (it may have been deleted on another device). Check the rating plate, then press Remove again.","bad"); return; }
-    if (rcNow!==rcSeen){ rcSeen = rcNow; eqSeen = eqNow; redraw(); toast("The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
+    if (eqSeen && !eqNow){ eqSeen = false; rcSeen = rcNow; const off = redraw(); if (off) toast(off,"bad"); toast("The appliance record couldn't be found (it may have been deleted on another device). Check the rating plate, then press Remove again.","bad"); return; }
+    if (rcNow!==rcSeen){ rcSeen = rcNow; eqSeen = eqNow; toast(redraw() || "The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
     if (who==="me"){
-      const r = clearRule(h); if (!r.ok){ toast(r.why,"bad"); return; }
+      /* Any refusal (e.g. a rating written without a change entry, or a licence change) redraws the form so the reason shows. */
+      const r = clearRule(h); if (!r.ok){ toast(redraw() || r.why,"bad"); return; }
       removerName = b.rname.value.trim(); removerAddress = b.raddr.value.trim(); removerTssaCert = b.rcert.value.trim();
       if (!removerName || !removerAddress || !removerTssaCert){ fieldErr([b.rname, b.raddr, b.rcert].find(x=>!x.value.trim()), "Enter your name, address and TSSA certificate number."); return; }
     } else {
@@ -2723,6 +2759,8 @@ function hazardForm(j){
     if (notified){ rec.distributorNotifiedRecordedBy = rec.by; rec.distributorNotifiedRecordedAt = at; }
     /* Marker for "rating changed after this tag": how many rating changes the equipment had when the tag was put on. */
     const markEq = rec.equipmentId || j.equipmentId || null;
+    /* Re-read first, so changes made on another device before this tag aren't counted as "after". */
+    if (markEq && !(await freshEquipment(markEq, true))) return;
     if (markEq){ const me0 = equipmentById(markEq); rec.ratingMark = {equipmentId:markEq, n:Array.isArray(me0?.ratingChanges) ? me0.ratingChanges.length : 0}; }
     if (imm) rec.writtenNoticeDueAt = new Date(ts(at)+14*DAY).toISOString();
     else rec.writtenNoticeDue = notified ? new Date(ts(notified)+14*DAY).toISOString() : null;
@@ -3079,6 +3117,7 @@ function customerForm(c){
   onSubmit(b, async ()=>{
     const d = {name:b.name.value.trim(), address:b.address.value.trim(), phone:b.phone.value.trim(), email:b.email.value.trim(), notes:b.notes.value.trim()};
     if (!d.name){ fieldErr(b.name, "Enter the customer's name."); return; }
+    if (b.email.validity.typeMismatch){ fieldErr(b.email, "Enter a valid email address, or leave it empty."); return; }
     if (c){ if (!(await writeDoc("customers/"+c.id, d, true))) return; Object.assign(c, d); closeOverlay(); toast("Saved."); render(); return; }
     const id = uid("cust"); d.createdAt = now(); if (!(await writeDoc("customers/"+id, d))) return; S.customers.push(Object.assign({id}, d)); closeOverlay(); toast("Customer added."); openCustomer(id);
   });
@@ -3249,16 +3288,29 @@ function userForm(u){
   drawC();
   $("#ac", b).addEventListener("click", ()=>{ creds.push({name:"", number:"", expires:""}); drawC(); });
   showModal(b, {wide:true});
+  const formData = ()=> ({name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null,
+      gasLicence:GAS_LICENCES.includes(b.gasLicence.value)?b.gasLicence.value:"none", tssaCertNumber:b.tssaCertNumber.value.trim(), address:b.address.value.trim(), credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()})),
+      ...(u?{active:b.active.checked}:{})});
+  /* Values when the form was opened: on save only the fields the editor changed are written (another device may have changed the rest). */
+  const open0 = formData();
   onSubmit(b, async ()=>{
-    const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null,
-      gasLicence:GAS_LICENCES.includes(b.gasLicence.value)?b.gasLicence.value:"none", tssaCertNumber:b.tssaCertNumber.value.trim(), address:b.address.value.trim(), credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()}))};
+    const d = formData();
     if (!d.name){ fieldErr(b.name, "Enter the person's full name."); return; }
+    if (b.email.validity.typeMismatch){ fieldErr(b.email, "Enter a valid email address, or leave it empty."); return; }
     if (u){
-      d.active = b.active.checked;
+      const touched = Object.keys(d).filter(k=> JSON.stringify(d[k])!==JSON.stringify(open0[k]));
+      if (!touched.length){ closeOverlay(); return; }
+      let snap;
+      try{ snap = await db.doc("users/"+u.id).get(); }
+      catch(e){ console.error(e); toast("Couldn't check the latest version of this person. Try again.","bad"); return; }
+      if (!snap || !snap.exists){ toast("This person's record no longer exists.","bad"); return; }
+      const fresh = snap.data() || {};
+      const patch = {}; touched.forEach(k=> patch[k] = d[k]);
       /* Turning an account back on also clears the "duplicate setup owner" marker. */
-      if (d.active && u.setupDuplicateOf) d.setupDuplicateOf = null;
-      if (!(await writeDoc("users/"+u.id, d, true))) return;
-      Object.assign(u, d);
+      if (("active" in patch ? patch.active : fresh.active!==false) && fresh.setupDuplicateOf) patch.setupDuplicateOf = null;
+      if (!(await writeDoc("users/"+u.id, patch, true))) return;
+      Object.keys(u).forEach(k=>{ if (k!=="id") delete u[k]; });
+      Object.assign(u, fresh, patch); normalizeUser(u);
       /* If you edited the person you're viewing as, keep the role in step (or pick someone else if deactivated). */
       if (u.id===S.userId){ closeOverlay(); toast("Saved."); if (u.active===false || !ROLE_LABELS[u.role]) restoreUser(); else { S.role = u.role; lsSet("sr_role", u.role); render(); } return; }
     }
