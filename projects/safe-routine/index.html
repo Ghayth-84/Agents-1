@@ -339,7 +339,8 @@ body:has(#setup) #setup{padding-top:calc(var(--banner-h,0px) + 24px)}
   body:has(#overlays .overlay) #toasts{top:calc(10px + env(safe-area-inset-top,0px)); bottom:auto}
   /* ...and only the newest one shows there, with room kept above the form so it doesn't cover the first field. */
   body:has(#overlays .overlay) #toasts .toast:not(:last-child){display:none}
-  .overlay .modal{max-height:calc(100vh - 110px - env(safe-area-inset-top,0px))}
+  /* A showing toast may be taller than that room (long message): the form then starts below it, so its title stays visible. */
+  .overlay .modal{max-height:calc(100vh - max(110px, var(--toast-h,0px) + 36px) - env(safe-area-inset-top,0px))}
 }
 @media (max-width:520px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .kpi .num{font-size:24px} h1{font-size:22px} .steps .lb{font-size:10px} }
 @media print{ #side,#top,#tabbar,.btn,.tabs{display:none!important} #main{padding:0} .card{box-shadow:none} }
@@ -532,26 +533,38 @@ function toLocalInput(iso){ const d = iso?new Date(iso):new Date(); const p=n=>S
 function mapsUrl(addr){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr||""); }
 /* At most 2 toasts show at once, so they never cover much of the page. Success toasts go away sooner.
    Error toasts come first: they are kept after (in front of) success toasts, and an older success toast goes first when there are too many.
-   Each toast gets a number in the order shown (_at). onSubmit / withBusy note the last number when an action starts (ACTION_START). */
-const MAX_TOASTS = 2;
-let TOAST_N = 0, ACTION_START = 0;
-const markActionStart = ()=>{ ACTION_START = TOAST_N; };
+   Each toast gets a number in the order shown (_at). onSubmit / withBusy note the last number when an action starts (ACTION_START).
+   While another action is still running, the start is not moved, so its errors are not cleared by the other action's success.
+   Errors shown while an action runs (_act) and after it started are never dropped by the limit: the stack may grow to MAX_KEEP to fit them. */
+const MAX_TOASTS = 2, MAX_KEEP = 4;
+let TOAST_N = 0, ACTION_START = 0, BUSY_N = 0, ACTION_N = 0;
+const markActionStart = ()=>{ if (!BUSY_N) ACTION_START = TOAST_N; };
+let toastObs = null;
 function toast(msg, kind){
   const t = el(`<div class="toast ${kind||""}">${icon(kind==="bad"?"alert":"check","sm")}<span>${esc(msg)}</span></div>`);
-  const box = $("#toasts"); t._at = ++TOAST_N;
+  const box = $("#toasts"); t._at = ++TOAST_N; t._act = BUSY_N > 0;
+  /* Phone: the height of the toasts is kept in --toast-h, so an open form starts below them (see CSS). */
+  if (!toastObs && window.ResizeObserver){ toastObs = new ResizeObserver(()=>document.documentElement.style.setProperty("--toast-h", box.offsetHeight+"px")); toastObs.observe(box); }
   /* The same message already showing (e.g. a retry with the same mistake) is replaced, not shown twice. */
   $$(".toast", box).forEach(x=>{ if (x.classList.contains("bad")===(kind==="bad") && x.textContent===t.textContent) x.remove(); });
   /* A success (e.g. after a form was saved and closed) clears only error toasts shown BEFORE the current action started —
      they belonged to earlier tries. Errors from this action (e.g. "Saved, but … couldn't be recorded") stay. */
-  if (kind!=="bad") $$(".toast.bad", box).forEach(x=>{ if ((x._at||0) <= ACTION_START) x.remove(); });
+  /* Form check messages (fieldErr, e.g. "Give a reason.") are cleared by any later success. */
+  if (kind!=="bad") $$(".toast.bad", box).forEach(x=>{ if (x._val || (x._at||0) <= ACTION_START) x.remove(); });
   if (kind==="bad") box.appendChild(t); else box.insertBefore(t, $(".toast.bad", box));
   setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
-  /* Never remove the toast just added: drop an older success toast first, else the oldest error. */
-  while (box.children.length > MAX_TOASTS) ([...box.children].find(x=>x!==t && !x.classList.contains("bad")) || [...box.children].find(x=>x!==t)).remove();
+  /* Never remove the toast just added: drop an older success toast first, then errors from earlier actions.
+     Errors from the current action stay (up to MAX_KEEP toasts in all); only past that the oldest goes. */
+  while (box.children.length > MAX_TOASTS){
+    const rest = [...box.children].filter(x=>x!==t);
+    const drop = rest.find(x=>!x.classList.contains("bad")) || rest.find(x=>!x._act || (x._at||0) <= ACTION_START || x._val) || (box.children.length > MAX_KEEP ? rest[0] : null);
+    if (!drop) break; drop.remove();
+  }
+  return t;
 }
 /* Form validation error: show it, then scroll the field into view and focus it (so it isn't hidden on a phone). */
 function fieldErr(input, msg){
-  toast(msg, "bad");
+  toast(msg, "bad")._val = true;
   if (!input || typeof input.focus!=="function") return;
   try{ input.scrollIntoView({block:"center"}); }catch(e){}
   try{ input.focus({preventScroll:true}); }catch(e){}
@@ -591,19 +604,21 @@ function safeUrl(u, kind){
   return "";
 }
 /* Busy guards: ignore repeat clicks/submits while an async save is running. */
-function withBusy(btns, fn){
+/* Every action first checks the current person (requireMe: one read of their record), unless opts.noUser
+   (first-start setup and the "setup not finished" screen, where no one is chosen yet). */
+function withBusy(btns, fn, opts){
   const list = (Array.isArray(btns) ? btns : [btns]).filter(Boolean);
   return async (...a)=>{
     if (!list.length || list[0].dataset.busy) return;
-    markActionStart();
+    markActionStart(); BUSY_N++; ACTION_N++;
     list.forEach(b=>{ b.dataset.busy = "1"; b.disabled = true; });
-    try{ return await fn(...a); }
+    try{ if (!opts?.noUser && !(await requireMe())) return; return await fn(...a); }
     catch(e){ console.error(e); toast("Something went wrong. Check the result before trying again.", "bad"); }
-    finally{ list.forEach(b=>{ delete b.dataset.busy; b.disabled = false; }); }
+    finally{ BUSY_N--; list.forEach(b=>{ delete b.dataset.busy; b.disabled = false; }); }
   };
 }
 /* App forms skip the browser's own validation bubbles: every submit handler checks its fields itself and shows the app message. */
-function onSubmit(form, fn){
+function onSubmit(form, fn, opts){
   form.noValidate = true;
   form.addEventListener("submit", async e=>{
     e.preventDefault();
@@ -613,10 +628,10 @@ function onSubmit(form, fn){
     /* A date/time the browser can't read (half typed) would otherwise be saved as empty. Number fields check this themselves. */
     const bad = $$("input:not([type=number])", form).find(x=>!x.disabled && !x.closest("[hidden]") && x.validity && x.validity.badInput);
     if (bad){ const l = bad.closest(".field")?.querySelector("label")?.textContent.replace(/\s*\*\s*$/,"") || "A date"; fieldErr(bad, `${l}: this entry is not complete. Finish it or clear it.`); return; }
-    form.dataset.busy = "1"; btns.forEach(b=>b.disabled = true);
-    try{ await fn(e); }
+    form.dataset.busy = "1"; btns.forEach(b=>b.disabled = true); BUSY_N++; ACTION_N++;
+    try{ if (!opts?.noUser && !(await requireMe())) return; await fn(e); }
     catch(err){ console.error(err); toast("Something went wrong. Check the result before trying again.", "bad"); }
-    finally{ delete form.dataset.busy; btns.forEach(b=>b.disabled = false); }
+    finally{ BUSY_N--; delete form.dataset.busy; btns.forEach(b=>b.disabled = false); }
   });
 }
 const ACTIVE_KEYS = new Set();
@@ -731,7 +746,7 @@ function showSetupBlocked(msg){
   const wrap = el(`<div id="setup" role="dialog" aria-modal="true" aria-labelledby="setupH"><div class="card setupcard">${setupStopHtml(msg, true)}</div></div>`);
   document.body.appendChild(wrap);
   $("[data-reload]", wrap).addEventListener("click", ()=>location.reload());
-  const pb = $("[data-pick]", wrap); pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap)));
+  const pb = $("[data-pick]", wrap); pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap), {noUser:true}));
 }
 
 async function loadAll(){
@@ -793,7 +808,7 @@ function showSetup(){
       if (dup) lsSet(SETUP_BLOCKED_KEY, id);
       f.innerHTML = setupStopHtml(msg, dup);
       $("[data-reload]", f).addEventListener("click", ()=>location.reload());
-      const pb = $("[data-pick]", f); if (pb) pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap)));
+      const pb = $("[data-pick]", f); if (pb) pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap), {noUser:true}));
     };
     let warn = "";
     try{
@@ -817,7 +832,7 @@ function showSetup(){
     wrap.remove();
     if (warn){ toast(warn, "bad"); const m = $("#main"); if (m) m.prepend(el(`<div class="callout bad" style="margin-bottom:12px">${icon("alert","sm")}<div>${esc(warn)}</div></div>`)); }
     else toast(`Welcome, ${firstName(name)}. Add your team under Team.`);
-  });
+  }, {noUser:true});
 }
 function normalizeUser(u){
   u.credentials = (u.credentials||[]).map(c=> typeof c==="string" ? {name:c, number:"", expires:""} : c);
@@ -933,20 +948,55 @@ const userById = id=> S.users.find(u=>u.id===id);
 const customerById = id=> S.customers.find(c=>c.id===id);
 const equipmentById = id=> S.equipment.find(e=>e.id===id);
 const jobById = id=> S.jobs.find(j=>j.id===id);
-function me(){ return userById(S.userId) || null; }
+/* The person using this device. null when no one is chosen, or the account is turned off / has an unknown role. */
+function me(){ const u = userById(S.userId); return u && u.active!==false && ROLE_LABELS[u.role] ? u : null; }
 /* Re-read a user's record (default: the current user) in place, so a licence lowered or an account turned off on another
-   device is seen before a licence-gated action. true = read (or no user to read); false (with a toast) = stop. */
-async function freshMe(u){
-  u = u || me(); if (!u) return true;
+   device is seen before an action. true = read (or no user to read); false (with a toast) = stop.
+   For the current user it also acts on the result: turned off, missing or unknown role → back to the person picker;
+   role changed → the role is updated, the page redrawn and the action refused (so it is checked again with the new role);
+   licence changed → the page is redrawn. opts.quiet: no toasts (also no refusal for a role change); opts.noRender: caller redraws.
+   opts.once: skip the read if this action already re-read the current user (requireMe at the button press / submit). */
+let ME_READ_N = -1;
+async function freshMe(u, opts){
+  opts = opts||{};
+  u = u || userById(S.userId); if (!u) return true;
+  if (opts.once && BUSY_N && ME_READ_N===ACTION_N && u.id===S.userId) return true;
   let snap;
   try{ snap = await db.doc("users/"+u.id).get(); }
-  catch(e){ console.error(e); toast("Couldn't check your latest licence. Try again.","bad"); return false; }
-  if (!snap || !snap.exists){ toast("Your user record no longer exists. Choose who you are again.","bad"); return false; }
+  catch(e){ console.error(e); if (!opts.quiet) toast("Couldn't check your latest account details (licence and role). Try again.","bad"); return false; }
+  const self = u.id===S.userId;
+  if (!snap || !snap.exists){
+    S.users = S.users.filter(x=>x.id!==u.id);
+    if (self) dropMe(GONE_MSG, GONE_MSG); else if (!opts.quiet) toast("This user record no longer exists. Choose who you are again.","bad");
+    return false;
+  }
+  const sig = x=> [x.role, licOf(x), x.active!==false].join("|"), before = sig(u);
   const data = snap.data() || {};
   const id = u.id; Object.keys(u).forEach(k=>{ if (k!=="id") delete u[k]; }); Object.assign(u, data, {id}); normalizeUser(u);
+  if (!self) return true;
+  if (u.active===false || !ROLE_LABELS[u.role]){ dropMe(OFF_MSG, OFF_PICK_MSG); return false; }
+  const roleChanged = S.role!==u.role;
+  if (roleChanged){ S.role = u.role; lsSet("sr_role", u.role); }
+  if (!opts.noRender && (roleChanged || sig(u)!==before)){
+    /* Don't wipe text the user has started typing on the page for a licence change: redraw the side and offer a refresh. */
+    if (roleChanged || !hasDraft($("#main"))) render(); else { renderSide(); renderTabbar(); showRefreshHint(); }
+  }
+  if (roleChanged && !opts.quiet){ toast(`Your role was changed to ${ROLE_LABELS[u.role]} on another device. Check the page, then try again.`,"bad"); return false; }
   return true;
 }
 const OFF_MSG = "Your account is turned off. Choose who you are again.";
+const OFF_PICK_MSG = "Your account is turned off. Pick who is using this device.";
+const GONE_MSG = "Your user record no longer exists. Pick who is using this device.";
+/* The current account can no longer be used here: say why, close any open form and show the person picker. */
+function dropMe(msg, pickMsg){ toast(msg, "bad"); clearOverlays(); restoreUser(pickMsg); }
+/* Start of every write action: a person must be chosen, and their record is re-read once (freshMe acts on changes). */
+async function requireMe(){
+  if (!userById(S.userId)){ toast("Choose who you are first.","bad"); return false; }
+  if (!(await freshMe())) return false;
+  if (!me()){ toast("Choose who you are first.","bad"); return false; }
+  ME_READ_N = ACTION_N;
+  return true;
+}
 const fieldRoles = ["technician","apprentice"];
 const isField = ()=> fieldRoles.includes(S.role);
 const activeUsers = ()=> S.users.filter(u=>u.active!==false);
@@ -1074,13 +1124,14 @@ function setUser(userId, silent){
 }
 /* Never switch silently to a different person: if the saved person is turned off or missing (or, with real data, no one
    was saved on this device), show the person picker with a message. Preview with example data may start as a technician. */
-function restoreUser(){
+/* pickMsg: the current account was just found turned off or deleted — always show the picker with this message. */
+function restoreUser(pickMsg){
   const list = pickableUsers(), saved = lsGet("sr_user");
   S.ui.pickMsg = "";
-  const u = saved ? list.find(x=>x.id===saved)
+  const u = pickMsg ? null : saved ? list.find(x=>x.id===saved)
     : mode==="preview" ? (list.find(x=>x.role===lsGet("sr_role")) || list.find(x=>x.role==="technician") || list[0]) : null;
   if (u && setUser(u.id, true)) return;
-  if (list.length) S.ui.pickMsg = saved && mode!=="preview" ? "Your account is turned off. Pick who is using this device." : "Pick who is using this device.";
+  if (list.length) S.ui.pickMsg = pickMsg || (saved && mode!=="preview" ? OFF_PICK_MSG : "Pick who is using this device.");
   S.userId = null; S.role = "technician"; render();
 }
 /* Shown instead of the page while no person is chosen. */
@@ -1095,8 +1146,9 @@ function go(tab){ S.view = {tab, jobId:null, jobTab:"overview", equipmentId:null
 function openJob(id, tab){
   const j = jobById(id); if (!j) return;
   S.view.jobId = id; S.view.jobTab = tab||"overview"; closeOverlay(); render(); window.scrollTo(0,0);
-  /* Also re-read red tags, so "left safe" and the safety items are shown against the latest tags. */
-  Promise.all([loadJobSub(id), freshHazards({quiet:true, noRender:true})]).then(()=>{
+  /* Also re-read red tags, so "left safe" and the safety items are shown against the latest tags,
+     and the current user, so "Report unsafe condition" matches the latest licence (e.g. restored on another device). */
+  Promise.all([loadJobSub(id), freshHazards({quiet:true, noRender:true}), freshMe(null, {quiet:true, noRender:true})]).then(()=>{
     if (S.view.jobId!==id) return;
     /* Don't wipe what the user has started typing: skip the main re-render while a field has unsaved text. */
     if (hasDraft($("#main"))){ renderSide(); renderTabbar(); showRefreshHint(); return; }
@@ -1761,7 +1813,9 @@ function renderJob(id){
     const n = sec ? sectionUnseen(id, sec).length : 0;
     const extra = k==="safety" && hz.length ? `<span class="count">!</span>` : "";
     const b = el(`<button role="tab" class="${S.view.jobTab===k?"active":""}">${icon(ic,"sm")} ${esc(label)}${n?`<span class="count">${n}</span>`:""}${extra}</button>`);
-    b.addEventListener("click", ()=>{ S.view.jobTab = k; if (sec) markSeen(id, sec); renderMain(); renderSide(); renderTabbar(); });
+    b.addEventListener("click", ()=>{ S.view.jobTab = k; if (sec) markSeen(id, sec); renderMain(); renderSide(); renderTabbar();
+      /* Safety tab: re-read the current user once, so the red-tag button matches the latest licence (redraws only on a change). */
+      if (k==="safety") freshMe(null, {quiet:true}); });
     tb.appendChild(b);
   });
   wrap.appendChild(tb);
@@ -1865,13 +1919,15 @@ async function approveJob(j){
     const approver = me();
     if (!approver){ toast("Choose who you are first.", "bad"); return; }
     /* Re-read the job, its details and the red tags, then check who may approve and what is missing. null = stop. */
-    const check = async ()=>{
+    /* reread: always read again (second check). The first check skips the read if the button press already did it (requireMe). */
+    const check = async (reread)=>{
       if (!(await freshJob(j, ["completion_review"]))) return null;
       if (!(await loadJobSub(j.id))){ toast("Couldn't check the latest job details. Try again.", "bad"); return null; }
       if (!(await freshHazards({noRender:true}))) return null;
       /* Re-read the approver: the licence may have been lowered (or the account turned off) on another device. */
-      if (!(await freshMe(approver))) return null;
+      if (!(await freshMe(approver, {once:!reread}))) return null;
       if (approver.active===false){ toast(OFF_MSG, "bad"); render(); return null; }
+      if (!["owner","supervisor"].includes(approver.role)){ toast("Only an owner or supervisor can approve a job.", "bad"); render(); return null; }
       const self = workedOnJob(j, approver.id);
       if (self && !hasLic(approver, "G2")){ toast(SELF_APPROVE_MSG, "bad"); render(); return null; }
       const items = completionItems(j);
@@ -1879,14 +1935,14 @@ async function approveJob(j){
       if (hard.length){ toast("Can't close — safety items can't be skipped: "+hard.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return null; }
       return {self, missing:items.filter(i=>!i.ok)};
     };
-    const c1 = await check(); if (!c1) return;
+    const c1 = await check(false); if (!c1) return;
     let reason = null;
     if (c1.missing.length){
       reason = await promptBox("Close with items missing?", "Still missing: "+c1.missing.map(m=>m.label).join(", ")+". Say why you are closing anyway. The reason is saved in the timeline.", "Close anyway");
       if (!reason) return;
     }
     /* Check again just before writing: something may have changed while the reason was being typed. */
-    const c2 = await check(); if (!c2) return;
+    const c2 = await check(true); if (!c2) return;
     if (c2.missing.some(m=>!c1.missing.some(x=>x.label===m.label))){ toast("The checklist changed while you were deciding. Check it and try again.", "bad"); S.view.jobTab="completion"; render(); return; }
     const missing = c2.missing, selfApproved = c2.self;
     if (!missing.length) reason = null;
@@ -2039,7 +2095,7 @@ function openJobForm(j){
       const changed = k=> changes.includes(k);
       if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
       if (changed("equipmentId") || changed("customerId")){
-        const what = changed("equipmentId") ? "equipment" : "customer";
+        const what = changed("customerId") ? "customer" : "equipment"; /* a new customer also changes the equipment list */
         if (j.status==="completion_review"){ toast(`The ${what} can't be changed while the job is waiting for review. Send it back first.`,"bad"); return; }
         if (!(await freshHazards({noRender:true}))) return;
         if (tagLock(j)){ toast(`This job or its equipment has an open red tag. The ${what} can't be changed until the red tag is removed.`,"bad"); return; }
@@ -2677,9 +2733,11 @@ async function clearForm(h, audit, tagName){
   /* Opened after a re-read: if another window opened or the page changed meanwhile, don't open the form on top of it. */
   const viewKey = ()=> [S.view.tab, S.view.jobId, S.view.jobTab, S.view.equipmentId].join("|");
   const ov0 = $("#overlays").lastElementChild, view0 = viewKey();
-  /* Re-read the equipment and the current user first: the rating and the licence decide who may remove the tag. */
+  /* A turned-off (or missing) account records nothing — not even an inspector removal: close the form, show the picker. */
+  const gone = ()=>{ if (me()) return false; if (userById(S.userId)) dropMe(OFF_MSG, OFF_PICK_MSG); else { toast("Choose who you are first.","bad"); closeOverlay(); } return true; };
+  /* Re-read the equipment and the current user first (no second read if the button press already did): the rating and the licence decide who may remove the tag. */
   if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
-  if (!(await freshMe())) return;
+  if (!(await freshMe(null, {once:true})) || gone()) return;
   if ($("#overlays").lastElementChild!==ov0 || viewKey()!==view0) return;
   const rule = clearRule(h); const u = me()||{};
   let eqSeen = !!equipmentById(ruleEquipmentId(h));
@@ -2728,8 +2786,9 @@ async function clearForm(h, audit, tagName){
     let removerName, removerAddress = "", removerTssaCert = "";
     /* Re-read the equipment again: the rating may have been changed on another device while this form was open. */
     if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
-    /* Re-read the current user too: the licence may have been lowered (or the account turned off) on another device. */
-    if (!(await freshMe())) return;
+    /* Re-read the current user too (already done when Remove was pressed: onSubmit → requireMe): the licence may have
+       been lowered, or the account turned off, on another device. */
+    if (!(await freshMe(null, {once:true})) || gone()) return;
     const rcNow = ratingChangesSince(h).length, eqNow = !!equipmentById(ruleEquipmentId(h));
     if (eqSeen && !eqNow){ eqSeen = false; rcSeen = rcNow; const off = redraw(); if (off) toast(off,"bad"); toast("The appliance record couldn't be found (it may have been deleted on another device). Check the rating plate, then press Remove again.","bad"); return; }
     if (rcNow!==rcSeen){ rcSeen = rcNow; eqSeen = eqNow; toast(redraw() || "The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
@@ -2777,9 +2836,9 @@ function hazardForm(j){
   const sync = ()=>{ const imm = b.level.value==="immediate"; $$("[data-notimm]", b).forEach(n=>n.hidden = imm); $$("[data-imm]", b).forEach(n=>n.hidden = !imm); };
   b.level.addEventListener("change", sync); sync();
   onSubmit(b, async ()=>{
-    /* Re-read the current user: the licence may have been lowered (or the account turned off) on another device. */
-    if (!(await freshMe())) return;
-    if (me()?.active===false){ toast(OFF_MSG,"bad"); return; }
+    /* Re-read the current user (already done when Save was pressed: onSubmit → requireMe): the licence may have been lowered on another device. */
+    if (!(await freshMe(null, {once:true}))) return;
+    if (!me()){ toast("Choose who you are first.","bad"); return; }
     if (!hasLic(me(), "G3")){ toast("Only a licensed gas technician (G3 or higher) can red-tag.","bad"); render(); return; }
     const description = b.description.value.trim(); if (!description){ fieldErr(b.description, "Describe what you found."); return; }
     const imm = b.level.value==="immediate";
@@ -3497,6 +3556,7 @@ function renderFeedback(){
       const sel = e.target, prev = f.status||"New", next = sel.value;
       if (sel.dataset.busy) return; sel.dataset.busy = "1"; sel.disabled = true;
       try{
+        if (!(await requireMe())){ sel.value = prev; return; }
         if (await writeDoc("feedback/"+f.id, {status:next}, true)){ f.status = next; toast("Status updated."); renderSide(); }
         else sel.value = prev; /* show the saved value again */
       }finally{ delete sel.dataset.busy; sel.disabled = false; }
