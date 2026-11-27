@@ -292,6 +292,8 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 #toasts{position:fixed; z-index:200; right:18px; bottom:18px; display:flex; flex-direction:column; gap:8px; align-items:flex-end}
 .toast{background:var(--navy); color:#fff; padding:11px 15px; border-radius:12px; font-size:13.5px; box-shadow:var(--shadow-lg); max-width:340px; display:flex; gap:9px; align-items:flex-start; animation:pop .18s ease; border:1px solid var(--navy-line)}
 .toast.bad{background:#7a1d12}
+/* A modal is open (desktop): toasts go to the top right, so they don't cover the modal's buttons. */
+body:has(#overlays .overlay) #toasts{top:18px; bottom:auto}
 #setup{position:fixed; inset:0; z-index:150; background:var(--bg); overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:24px 16px}
 #setup .setupcard{width:min(560px,100%); margin-top:6vh}
 /* The safety banner stays visible above the first-start / setup screen. */
@@ -527,12 +529,22 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function lsRemove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function toLocalInput(iso){ const d = iso?new Date(iso):new Date(); const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function mapsUrl(addr){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr||""); }
-/* At most 2 toasts show at once (the newest), so they never cover much of the page. Success toasts go away sooner. */
+/* At most 2 toasts show at once, so they never cover much of the page. Success toasts go away sooner.
+   Error toasts come first: they are kept after (in front of) success toasts, and a success toast never pushes one out. */
 const MAX_TOASTS = 2;
 function toast(msg, kind){
   const t = el(`<div class="toast ${kind||""}">${icon(kind==="bad"?"alert":"check","sm")}<span>${esc(msg)}</span></div>`);
-  const box = $("#toasts"); box.appendChild(t); setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
-  while (box.children.length > MAX_TOASTS) box.firstElementChild.remove();
+  const box = $("#toasts");
+  if (kind==="bad") box.appendChild(t); else box.insertBefore(t, $(".toast.bad", box));
+  setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
+  while (box.children.length > MAX_TOASTS) ($(".toast:not(.bad)", box) || box.firstElementChild).remove();
+}
+/* Form validation error: show it, then scroll the field into view and focus it (so it isn't hidden on a phone). */
+function fieldErr(input, msg){
+  toast(msg, "bad");
+  if (!input || typeof input.focus!=="function") return;
+  try{ input.scrollIntoView({block:"center"}); }catch(e){}
+  try{ input.focus({preventScroll:true}); }catch(e){}
 }
 let downloadsApi;
 async function downloadFile(name, text){
@@ -671,8 +683,9 @@ async function boot(){
     const blk = lsGet(SETUP_BLOCKED_KEY);
     if (blk){
       const bu = userById(blk);
-      if (bu && (bu.active===false || bu.setupDuplicateOf)){ showSetupBlocked(DUP_MSG); return; }
-      if (bu) lsRemove(SETUP_BLOCKED_KEY); /* the owner turned this account back on */
+      /* An account the owner turned back on (active) is no longer blocked, even if the old duplicate marker is still there. */
+      if (bu && bu.active===false){ showSetupBlocked(DUP_MSG); return; }
+      if (bu) lsRemove(SETUP_BLOCKED_KEY);
     }
   } else {
     db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll();
@@ -682,16 +695,25 @@ async function boot(){
 const SETUP_BLOCKED_KEY = "sr_setup_blocked";
 const DUP_MSG = "Another device finished setup first. Ask that owner to add you.";
 /* Full-screen "setup not finished" message (with a Reload button). */
-function setupStopHtml(msg){
+function setupStopHtml(msg, pick){
   return `<div class="row">${brandMark(40)}<div><h2 id="setupH">Setup not finished on this device</h2></div></div>
     <div class="callout bad mt" role="alert">${icon("alert","sm")}<div>${esc(msg)}</div></div>
-    <div class="mf"><button type="button" class="btn primary" data-reload>Reload</button></div>`;
+    <div class="mf">${pick?`<button type="button" class="btn" data-pick>Pick a person</button>`:""}<button type="button" class="btn primary" data-reload>Reload</button></div>`;
+}
+/* "Pick a person" on the blocked screen: forget the blocked marker and show the person picker.
+   (Prototype: the picker is accepted on this device only — there is no real login yet.) */
+async function pickFromBlocked(wrap){
+  lsRemove(SETUP_BLOCKED_KEY);
+  await loadAll();
+  wrap.remove();
+  S.userId = null; S.role = "technician"; S.ui.pickMsg = "Pick who is using this device."; render();
 }
 function showSetupBlocked(msg){
   renderBanner();
-  const wrap = el(`<div id="setup" role="dialog" aria-modal="true" aria-labelledby="setupH"><div class="card setupcard">${setupStopHtml(msg)}</div></div>`);
+  const wrap = el(`<div id="setup" role="dialog" aria-modal="true" aria-labelledby="setupH"><div class="card setupcard">${setupStopHtml(msg, true)}</div></div>`);
   document.body.appendChild(wrap);
   $("[data-reload]", wrap).addEventListener("click", ()=>location.reload());
+  const pb = $("[data-pick]", wrap); pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap)));
 }
 
 async function loadAll(){
@@ -734,8 +756,8 @@ function showSetup(){
   setTimeout(()=>f.companyName.focus(), 30);
   onSubmit(f, async ()=>{
     const companyName = f.companyName.value.trim(), name = f.name.value.trim();
-    if (!companyName){ toast("Enter the company name.","bad"); return; }
-    if (!name){ toast("Enter your name.","bad"); return; }
+    if (!companyName){ fieldErr(f.companyName, "Enter the company name."); return; }
+    if (!name){ fieldErr(f.name, "Enter your name."); return; }
     /* Someone may have finished setup on another device. */
     let snap;
     try{ snap = await db.collection("users").get(); }catch(e){ console.error(e); toast("Couldn't check the team list. Try again.","bad"); return; }
@@ -751,8 +773,9 @@ function showSetup(){
     const stop = (msg, dup)=>{
       /* Remember it, so a reload shows this again instead of logging in as the other owner. */
       if (dup) lsSet(SETUP_BLOCKED_KEY, id);
-      f.innerHTML = setupStopHtml(msg);
+      f.innerHTML = setupStopHtml(msg, dup);
       $("[data-reload]", f).addEventListener("click", ()=>location.reload());
+      const pb = $("[data-pick]", f); if (pb) pb.addEventListener("click", withBusy(pb, ()=>pickFromBlocked(wrap)));
     };
     let warn = "";
     try{
@@ -1026,7 +1049,7 @@ function restoreUser(){
   const u = saved ? list.find(x=>x.id===saved)
     : mode==="preview" ? (list.find(x=>x.role===lsGet("sr_role")) || list.find(x=>x.role==="technician") || list[0]) : null;
   if (u && setUser(u.id, true)) return;
-  if (list.length) S.ui.pickMsg = saved ? "Your account is turned off. Pick who is using this device." : "Pick who is using this device.";
+  if (list.length) S.ui.pickMsg = saved && mode!=="preview" ? "Your account is turned off. Pick who is using this device." : "Pick who is using this device.";
   S.userId = null; S.role = "technician"; render();
 }
 /* Shown instead of the page while no person is chosen. */
@@ -1271,7 +1294,7 @@ function promptBox(title, msg, okLabel){
     ov.addEventListener("click", e=>{ if (e.target===ov) finish(null); });
     $$("[data-close]", b).forEach(x=>x.addEventListener("click", ()=>finish(null)));
     $("[data-no]", b).addEventListener("click", ()=>finish(null));
-    b.addEventListener("submit", e=>{ e.preventDefault(); const v = b.r.value.trim(); if (!v){ toast("Give a reason.","bad"); return; } finish(v); });
+    b.addEventListener("submit", e=>{ e.preventDefault(); const v = b.r.value.trim(); if (!v){ fieldErr(b.r, "Give a reason."); return; } finish(v); });
     $("#overlays").appendChild(ov);
     setTimeout(()=>b.r.focus(), 20);
   });
@@ -1543,8 +1566,8 @@ function ownerAlerts(){
   }));
   S.jobs.filter(j=>!isClosed(j) && isLate(j)).forEach(j=> out.push({c:"warn", ic:"clock", t:`${j.refNumber} is running late`, s:`Scheduled ${fmtDate(j.scheduledAt)} · ${userById(j.technicianId)?.name||"unassigned"}`, go:()=>openJob(j.id)}));
   S.jobs.filter(j=>!isClosed(j) && !j.technicianId).forEach(j=> out.push({c:"warn", ic:"user", t:`${j.refNumber} has no technician`, s:`${customerById(j.customerId)?.name||""} · ${fmtDate(j.scheduledAt)}`, go:()=>openJob(j.id)}));
-  const due = S.equipment.filter(e=>maintenanceDue(e)?.overdue);
-  if (due.length) out.push({c:"info", ic:"box", t:`${due.length} unit(s) are due for yearly maintenance`, s:"Last service was over 12 months ago.", go:()=>{ S.ui.eqQ=""; S.ui.eqDue=true; go("equipment"); }});
+  const due = S.equipment.filter(maintDueOrUnreadable);
+  if (due.length) out.push({c:"info", ic:"box", t:`${due.length} unit(s) are due for yearly maintenance`, s:"Last service was over 12 months ago, or its date can't be read.", go:()=>{ S.ui.eqQ=""; S.ui.eqDue=true; go("equipment"); }});
   return out;
 }
 function activityFeed(){
@@ -1633,7 +1656,7 @@ function answerHelp(job, h){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${icon("send","sm")} Send answer</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    const response = b.r.value.trim(); if (!response){ toast("Type an answer first.","bad"); return; }
+    const response = b.r.value.trim(); if (!response){ fieldErr(b.r, "Type an answer first."); return; }
     const patch = {status:"resolved", response, resolvedBy:me()?.name||"Supervisor", resolvedAt:now()};
     if (!(await writeDoc("jobs/"+job.id+"/help/"+h.id, patch, true))) return;
     Object.assign(sub(job.id).help.find(x=>x.id===h.id)||{}, patch);
@@ -1802,7 +1825,7 @@ function workedOnJob(j, userId){
   return (s.events||[]).some(e=>e.byId===userId && (FIELD_EVENTS.has(e.type) || (e.type==="status" && e.status==="completion_review")));
 }
 const SELF_APPROVE_MSG = "Only a G2 or G1 can approve a job they worked on. Another supervisor (G2 or higher) must approve.";
-const SELF_APPROVE_SHORT = "You worked on this job — another G2+ must approve";
+const SELF_APPROVE_SHORT = "Another G2+ must approve (you worked on this job)";
 /* The person viewing worked on this job and isn't G2/G1: the Approve button is not shown (approveJob still checks). */
 const cantSelfApprove = j=>{ const u = me(); return !!u && workedOnJob(j, u.id) && !hasLic(u, "G2"); };
 async function approveJob(j){
@@ -1849,7 +1872,7 @@ function sendBackJob(j){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn danger solid">${icon("undo","sm")} Send back</button></div></form>`);
   showModal(b);
   onSubmit(b, ()=> once("status:"+j.id, async ()=>{
-    const reason = b.r.value.trim(); if (!reason){ toast("Say what needs fixing.","bad"); return; }
+    const reason = b.r.value.trim(); if (!reason){ fieldErr(b.r, "Say what needs fixing."); return; }
     if (!(await freshJob(j, ["completion_review"]))){ closeOverlay(); return; }
     const patch = {status:"working", review:{decision:"sent_back", reason, by:me()?.name||"Supervisor", at:now()}, sendBacks:(j.sendBacks||0)+1};
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
@@ -1891,7 +1914,7 @@ function techWarnings(techId, whenIso, trade, excludeId){
 function openJobForm(j){
   const editing = !!j;
   /* While in review the technician and equipment are fixed. While the job (or its equipment) has an open red tag,
-     the customer, equipment and site address stay as they are. The site address is locked whenever those are. */
+     the customer and equipment stay as they are. The site address can always be corrected (each change is logged). */
   const inReview = editing && j.status==="completion_review";
   const tagLock = j=> openHazards(h=>h.jobId===j.id || (!!j.equipmentId && h.equipmentId===j.equipmentId)).length>0;
   const eqLocked = inReview || (editing && tagLock(j));
@@ -1907,7 +1930,7 @@ function openJobForm(j){
       <div class="field"><label>Reference #</label><input name="refNumber" value="${esc(j?.refNumber||nextRef())}" ${editing?"readonly":""}></div>
       <div class="field newc" hidden><label>New customer name *</label><input name="newName"></div>
       <div class="field newc" hidden><label>Phone</label><input name="newPhone" type="tel"></div>
-      <div class="field" style="grid-column:1/-1"><label>Service address *</label><input name="siteAddress" required value="${esc(j?.siteAddress||"")}" placeholder="Street, city, province" ${eqLocked?"readonly":""}>${eqLocked?`<div class="hint">${esc(lockWhy)}</div>`:""}</div>
+      <div class="field" style="grid-column:1/-1"><label>Service address *</label><input name="siteAddress" required value="${esc(j?.siteAddress||"")}" placeholder="Street, city, province">${editing?`<div class="hint">Can always be corrected. Each change is recorded in the job timeline.</div>`:""}</div>
       <div class="field"><label>Date &amp; time *</label><input type="datetime-local" name="scheduledAt" required value="${esc(toLocalInput(j?.scheduledAt))}"></div>
       <div class="field"><label>Technician</label><select name="technicianId" ${inReview?"disabled":""}>${techOpts}</select>${inReview?`<div class="hint">Locked while waiting for review.</div>`:""}</div>
       <div class="field"><label>Trade *</label><select name="requiredTrade">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${(j?.requiredTrade||S.config.activeTheme)===k?"selected":""}>${esc(v.label)}</option>`).join("")}</select></div>
@@ -1940,11 +1963,11 @@ function openJobForm(j){
   onSubmit(b, async ()=>{
     let customerId = f.customerId.value;
     const siteAddress = f.siteAddress.value.trim();
-    if (!customerId){ toast("Choose a customer.","bad"); return; }
-    if (!siteAddress){ toast("Enter the service address.","bad"); return; }
-    const when = validDate(f.scheduledAt.value); if (!when){ toast("Enter a valid date and time.","bad"); return; }
+    if (!customerId){ fieldErr(f.customerId, "Choose a customer."); return; }
+    if (!siteAddress){ fieldErr(f.siteAddress, "Enter the service address."); return; }
+    const when = validDate(f.scheduledAt.value); if (!when){ fieldErr(f.scheduledAt, "Enter a valid date and time."); return; }
     if (customerId==="__new"){
-      const name = f.newName.value.trim(); if (!name){ toast("Enter the new customer's name.","bad"); return; }
+      const name = f.newName.value.trim(); if (!name){ fieldErr(f.newName, "Enter the new customer's name."); return; }
       customerId = uid("cust"); const c = {name, phone:f.newPhone.value.trim(), email:"", address:siteAddress, createdAt:now()};
       if (!(await writeDoc("customers/"+customerId, c))) return;
       S.customers.push(Object.assign({id:customerId}, c));
@@ -1955,21 +1978,33 @@ function openJobForm(j){
     const data = {customerId, siteAddress, scheduledAt:when.toISOString(), technicianId:f.technicianId.value||null,
       requiredTrade:f.requiredTrade.value, jobType:f.jobType.value, priority:f.priority.value, equipmentId:f.equipmentId.value||null};
     if (editing){
+      /* Trailing spaces in old data don't count as an address change. */
+      if (String(j.siteAddress??"").trim()===siteAddress) data.siteAddress = j.siteAddress;
       const changes = Object.keys(data).filter(k=>String(j[k]??"")!==String(data[k]??""));
       if (!changes.length){ closeOverlay(); return; }
       if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
+      if (String(j.siteAddress??"").trim()===siteAddress) data.siteAddress = j.siteAddress;
       const changed = k=> String(j[k]??"")!==String(data[k]??"");
       if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
-      if (changed("equipmentId") || changed("customerId") || changed("siteAddress")){
-        const what = changed("equipmentId") ? "equipment" : changed("customerId") ? "customer" : "site address";
+      if (changed("equipmentId") || changed("customerId")){
+        const what = changed("equipmentId") ? "equipment" : "customer";
         if (j.status==="completion_review"){ toast(`The ${what} can't be changed while the job is waiting for review. Send it back first.`,"bad"); return; }
         if (!(await freshHazards({noRender:true}))) return;
         if (tagLock(j)){ toast(`This job or its equipment has an open red tag. The ${what} can't be changed until the red tag is removed.`,"bad"); return; }
       }
       const prevTech = j.technicianId;
+      const addrChanged = changed("siteAddress"), oldAddr = String(j.siteAddress??"").trim();
+      /* Re-read red tags for the manager notice below (a failed read still lets the address be corrected). */
+      if (addrChanged) await freshHazards({quiet:true, noRender:true});
       if (!(await writeDoc("jobs/"+j.id, data, true))) return;
       Object.assign(j, data);
-      await logEvent(j.id, "edited", {note:"Changed: "+changes.map(k=>({customerId:"customer",siteAddress:"address",scheduledAt:"time",technicianId:"technician",requiredTrade:"trade",jobType:"type",priority:"priority",equipmentId:"equipment"}[k])).join(", ")});
+      if (addrChanged){
+        const who = me()?.name||ROLE_LABELS[S.role];
+        await logEvent(j.id, "edited", {note:`Site address changed: ${oldAddr||"(empty)"} → ${siteAddress} by ${who}`});
+        if (tagLock(j)) await notify(`Site address of red-tagged job ${j.refNumber} changed: ${oldAddr||"(empty)"} → ${siteAddress} by ${who}.`, {toRole:"managers", jobId:j.id});
+      }
+      const otherChanges = changes.filter(k=>k!=="siteAddress");
+      if (otherChanges.length) await logEvent(j.id, "edited", {note:"Changed: "+otherChanges.map(k=>({customerId:"customer",siteAddress:"address",scheduledAt:"time",technicianId:"technician",requiredTrade:"trade",jobType:"type",priority:"priority",equipmentId:"equipment"}[k])).join(", ")});
       if (data.technicianId && data.technicianId!==prevTech) await notify(`You've been assigned ${j.refNumber} (${fmtDate(j.scheduledAt)}).`, {toUser:data.technicianId, jobId:j.id});
       else if (data.technicianId && changes.includes("scheduledAt")) await notify(`${j.refNumber} was moved to ${fmtDate(j.scheduledAt)}.`, {toUser:data.technicianId, jobId:j.id});
       closeOverlay(); toast("Job updated."); render(); return;
@@ -2100,7 +2135,7 @@ function jobNotes(j, s){
   if (editable){
     const addBtn = $("#add", wrap);
     addBtn.addEventListener("click", withBusy(addBtn, async ()=>{
-      const ta = $("#nt", wrap); const text = ta.value.trim(); if (!text){ toast("Type a note first.","bad"); return; }
+      const ta = $("#nt", wrap); const text = ta.value.trim(); if (!text){ fieldErr(ta, "Type a note first."); return; }
       if (!(await freshJob(j, OPEN_STATUSES))) return;
       const rec = {text, by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()};
       const id = await addDoc("jobs/"+j.id+"/notes", rec); if (!id) return;
@@ -2274,7 +2309,7 @@ function leakSkip(j){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Skip</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    const reason = b.reason.value.trim(); if (!reason){ toast("Give a reason for skipping the leak test.","bad"); return; }
+    const reason = b.reason.value.trim(); if (!reason){ fieldErr(b.reason, "Give a reason for skipping the leak test."); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))){ closeOverlay(); return; }
     if (!(await freshHazards({noRender:true}))) return;
     if (leakNotPassed(j) && !jobHazards(j).length){ toast(LEAK_SKIP_BLOCKED, "bad"); closeOverlay(); renderMain(); return; }
@@ -2337,7 +2372,7 @@ function jobMaterials(j, s){
         const rep = el(`<div class="row mt"><input class="in" placeholder="Your answer…"><button class="btn primary sm">Reply</button></div>`);
         const repBtn = $("button", rep);
         repBtn.addEventListener("click", withBusy(repBtn, async ()=>{
-          const v = $("input", rep).value.trim(); if (!v){ toast("Type your answer first.","bad"); return; }
+          const v = $("input", rep).value.trim(); if (!v){ fieldErr($("input", rep), "Type your answer first."); return; }
           const patch = {status:"pending", reply:v, repliedAt:now()};
           if (!(await writeDoc("jobs/"+j.id+"/materials/"+m.id, patch, true))) return;
           Object.assign(m, patch);
@@ -2362,11 +2397,11 @@ function materialForm(j){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    const description = b.description.value.trim(); if (!description){ toast("Enter a description.","bad"); return; }
+    const description = b.description.value.trim(); if (!description){ fieldErr(b.description, "Enter a description."); return; }
     const qty = parseNum(b.qty.value===""?"1":b.qty.value, false), unitCost = parseNum(b.unitCost.value===""?"0":b.unitCost.value, false);
-    if (qty===null || b.qty.validity.badInput){ toast("Quantity must be a number, 0 or more.","bad"); return; }
-    if (b.unitCost.validity.badInput){ toast("Unit cost must be a number, 0 or more.","bad"); return; }
-    if (unitCost===null){ toast("Unit cost must be a number, 0 or more.","bad"); return; }
+    if (qty===null || b.qty.validity.badInput){ fieldErr(b.qty, "Quantity must be a number, 0 or more."); return; }
+    if (b.unitCost.validity.badInput){ fieldErr(b.unitCost, "Unit cost must be a number, 0 or more."); return; }
+    if (unitCost===null){ fieldErr(b.unitCost, "Unit cost must be a number, 0 or more."); return; }
     const file = b.receipt.files[0]; let up = {url:null, assetId:null};
     if (file){ up = await uploadFile(file); if (!up) return; }
     const rec = {description, qty, unitCost, source:b.source.value, receiptUrl:up.url, receiptAssetId:up.assetId, receiptType:file?String(file.type||""):null, status:"pending", by:me()?.name||"", byId:S.userId, at:now()};
@@ -2407,9 +2442,9 @@ async function freshHazard(h){
 /* A step time from a datetime field: required, not in the future, not before the red tag was recorded. */
 function stepTime(input, h, what){
   const d = input.value ? validDate(input.value) : null;
-  if (!d){ toast(`Enter the date and time for “${what}”.`,"bad"); return null; }
-  if (d.getTime() > Date.now()+5*60000){ toast(`“${what}”: that time is in the future.`,"bad"); return null; }
-  if (hazardAt(h) && d.getTime() < ts(hazardAt(h))-60000){ toast(`“${what}”: that time is before the red tag was recorded (${fmtDate(hazardAt(h))}).`,"bad"); return null; }
+  if (!d){ fieldErr(input, `Enter the date and time for “${what}”.`); return null; }
+  if (d.getTime() > Date.now()+5*60000){ fieldErr(input, `“${what}”: that time is in the future.`); return null; }
+  if (hazardAt(h) && d.getTime() < ts(hazardAt(h))-60000){ fieldErr(input, `“${what}”: that time is before the red tag was recorded (${fmtDate(hazardAt(h))}).`); return null; }
   return d;
 }
 function jobSafety(j){
@@ -2455,7 +2490,7 @@ function hazardCard(h, j){
   hazardSteps(h).forEach(st=>{
     const n = HZ_STEPS.indexOf(st)+1;
     const info = stepOk(h[st.k]) ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}${st.k==="writtenNoticeSentAt" && h.writtenNoticeLate?` <span class="pill bad">Sent late</span>`:""}`
-      : h[st.k] ? "Date can't be read — record it again."
+      : (h[st.k]!==undefined && h[st.k]!==null && h[st.k]!=="") ? "Date can't be read — record it again."
       : st.k==="gasShutOffAt" && h.gasShutOff ? "Ticked as shut off when reported, but no time recorded."
       : st.k==="writtenNoticeSentAt" && due ? `Not sent yet — due by ${esc(dueText(due))}` : "Not recorded";
     const row = el(`<div class="note row between wrap"><div><b>${n}. ${esc(st.label)}</b><div class="hint">${info}</div></div></div>`);
@@ -2467,7 +2502,7 @@ function hazardCard(h, j){
   if (!resolved && S.role!=="accountant" && jobOpen){
     const blocked = immStepsMissing(h);
     const r = el(`<button type="button" class="btn sm go" ${blocked?"disabled":""}>${icon("check","sm")} Remove red tag</button>`);
-    r.addEventListener("click", ()=>clearForm(h, audit, tagName));
+    r.addEventListener("click", withBusy(r, ()=>once("clear:"+h.id, ()=>clearForm(h, audit, tagName))));
     ab.appendChild(r);
     if (blocked) ab.appendChild(el(`<span class="hint">${esc(IMM_REMOVE_BLOCKED)}</span>`));
   }
@@ -2551,11 +2586,17 @@ async function freshEquipment(id, quietMissing){
   else S.equipment.push(Object.assign({id}, data));
   return true;
 }
-/* Rating changes recorded on the equipment after this red tag was put on (all of them if the tag's date can't be read). */
+/* Rating changes recorded on the equipment after this red tag was put on. No clocks: the tag stores how many changes the
+   equipment had when it was put on (ratingMark), and every later entry in the list is shown. Older tags without that mark
+   fall back to comparing times; an entry with no readable time (or a tag with no readable date) is shown, never dropped. */
 function ratingChangesSince(h){
-  const e = equipmentById(ruleEquipmentId(h)); const list = Array.isArray(e?.ratingChanges) ? e.ratingChanges.filter(c=>c && typeof c==="object") : [];
-  const t0 = ts(hazardAt(h));
-  return list.filter(c=> !Number.isFinite(t0) || !Number.isFinite(ts(c.at)) || ts(c.at) >= t0);
+  const eid = ruleEquipmentId(h), e = equipmentById(eid);
+  const raw = Array.isArray(e?.ratingChanges) ? e.ratingChanges : [];
+  const isRec = c=> c && typeof c==="object";
+  const m = h.ratingMark;
+  if (m && typeof m==="object" && m.equipmentId===eid && Number.isInteger(m.n) && m.n>=0 && m.n<=raw.length) return raw.slice(m.n).filter(isRec);
+  const t0 = ts(hazardAt(h)), list = raw.filter(isRec);
+  return list.filter(c=> !hazardAt(h) || !Number.isFinite(t0) || !c.at || !Number.isFinite(ts(c.at)) || ts(c.at) >= t0);
 }
 const ratingChangeLine = c=> `Rating changed after red tag: ${c.from||"?"} → ${c.to||"?"} by ${c.by||"unknown"} (${fmtDate(c.at)})`;
 /* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h.
@@ -2575,20 +2616,26 @@ function clearRule(h){
   else if (!hasLic(u, need)) why = need==="G1" ? "This appliance is over 400,000 BTU/h. Only a G1 can remove this red tag." : "Only a G2 or G1 gas technician can remove a red tag.";
   return {ok:!why, why, known, unknownWhy};
 }
+const unkHtml = r=> r.known ? "" : `<div class="callout warn mt">${icon("alert","sm")}<div>${esc(r.unknownWhy)} Until then a G2 or G1 is needed; if the appliance is over 400,000 BTU/h, only a G1 may remove this red tag.</div></div>`;
 async function clearForm(h, audit, tagName){
   if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); return; }
+  /* Opened after a re-read: if another window opened or the page changed meanwhile, don't open the form on top of it. */
+  const viewKey = ()=> [S.view.tab, S.view.jobId, S.view.equipmentId].join("|");
+  const ov0 = $("#overlays").lastElementChild, view0 = viewKey();
   /* Re-read the equipment first: its rating decides who may remove the tag. */
   if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
+  if ($("#overlays").lastElementChild!==ov0 || viewKey()!==view0) return;
   const rule = clearRule(h); const u = me()||{};
+  let eqSeen = !!equipmentById(ruleEquipmentId(h));
   const rcHtml = ()=>{ const rc = ratingChangesSince(h); return rc.length ? `<div class="callout bad mt">${icon("alert","sm")}<div>${rc.map(c=>`<div><b>${esc(ratingChangeLine(c))}</b></div>`).join("")}<div class="hint">Check the rating plate before removing this red tag.</div></div></div>` : ""; };
   let rcSeen = ratingChangesSince(h).length;
   const b = el(`<form>${modalHead("Remove red tag", tagName)}
     <div class="field"><label>Corrective action — what was repaired *</label><textarea name="fixText"></textarea></div>
     <div class="field mt"><label>Removed by *</label>
-      <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me${rule.ok?"":`<div class="hint">${esc(rule.why)}</div>`}</span></label>
+      <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me<div class="hint" data-mewhy ${rule.ok?"hidden":""}>${esc(rule.why)}</div></span></label>
       <label class="check"><input type="radio" name="who" value="inspector" ${rule.ok?"":"checked"}><span>A TSSA inspector</span></label></div>
     <div data-rc>${rcHtml()}</div>
-    ${rule.known?"":`<div class="callout warn mt">${icon("alert","sm")}<div>${esc(rule.unknownWhy)} Until then a G2 or G1 is needed; if the appliance is over 400,000 BTU/h, only a G1 may remove this red tag.</div></div>`}
+    <div data-unk>${unkHtml(rule)}</div>
     <div class="grid g2 mt" data-me ${rule.ok?"":"hidden"}>
       <div class="field"><label>Your name *</label><input name="rname" value="${esc(u.name||"")}"></div>
       <div class="field"><label>TSSA certificate number *</label><input name="rcert" value="${esc(u.tssaCertNumber||"")}"></div>
@@ -2600,21 +2647,29 @@ async function clearForm(h, audit, tagName){
   showModal(b, {wide:true});
   const sync = ()=>{ const w = b.who.value; $("[data-me]", b).hidden = w!=="me"; $("[data-in]", b).hidden = w!=="inspector"; };
   $$("input[name=who]", b).forEach(x=>x.addEventListener("change", sync));
+  /* After a refusal: redraw "Me" (allowed or not, and why) and the rating warning from the latest record. */
+  const redraw = ()=>{
+    const r = clearRule(h), meIn = $("input[name=who][value=me]", b), why = $("[data-mewhy]", b);
+    meIn.disabled = !r.ok; why.hidden = r.ok; why.textContent = r.why;
+    if (!r.ok && meIn.checked) $("input[name=who][value=inspector]", b).checked = true;
+    $("[data-unk]", b).innerHTML = unkHtml(r); $("[data-rc]", b).innerHTML = rcHtml(); sync();
+  };
   onSubmit(b, async ()=>{
-    const action = b.fixText.value.trim(); if (!action){ toast("Write the corrective action first.","bad"); return; }
+    const action = b.fixText.value.trim(); if (!action){ fieldErr(b.fixText, "Write the corrective action first."); return; }
     const who = b.who.value;
     if (who!=="me" && who!=="inspector"){ toast("Choose who removed the red tag.","bad"); return; }
     let removerName, removerAddress = "", removerTssaCert = "";
     /* Re-read the equipment again: the rating may have been changed on another device while this form was open. */
     if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
-    const rcNow = ratingChangesSince(h).length;
-    if (rcNow!==rcSeen){ rcSeen = rcNow; $("[data-rc]", b).innerHTML = rcHtml(); toast("The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
+    const rcNow = ratingChangesSince(h).length, eqNow = !!equipmentById(ruleEquipmentId(h));
+    if (eqSeen && !eqNow){ eqSeen = false; rcSeen = rcNow; redraw(); toast("The appliance record couldn't be found (it may have been deleted on another device). Check the rating plate, then press Remove again.","bad"); return; }
+    if (rcNow!==rcSeen){ rcSeen = rcNow; eqSeen = eqNow; redraw(); toast("The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
     if (who==="me"){
       const r = clearRule(h); if (!r.ok){ toast(r.why,"bad"); return; }
       removerName = b.rname.value.trim(); removerAddress = b.raddr.value.trim(); removerTssaCert = b.rcert.value.trim();
-      if (!removerName || !removerAddress || !removerTssaCert){ toast("Enter your name, address and TSSA certificate number.","bad"); return; }
+      if (!removerName || !removerAddress || !removerTssaCert){ fieldErr([b.rname, b.raddr, b.rcert].find(x=>!x.value.trim()), "Enter your name, address and TSSA certificate number."); return; }
     } else {
-      removerName = b.inspector.value.trim(); if (!removerName){ toast("Enter the inspector's name.","bad"); return; }
+      removerName = b.inspector.value.trim(); if (!removerName){ fieldErr(b.inspector, "Enter the inspector's name."); return; }
     }
     const notice = stepTime(b.notice, h, "Removal notice sent to the gas distributor"); if (!notice) return;
     if (!(await freshHazard(h))) return;
@@ -2653,12 +2708,12 @@ function hazardForm(j){
   b.level.addEventListener("change", sync); sync();
   onSubmit(b, async ()=>{
     if (!hasLic(me(), "G3")){ toast("Only a licensed gas technician (G3 or higher) can red-tag.","bad"); return; }
-    const description = b.description.value.trim(); if (!description){ toast("Describe what you found.","bad"); return; }
+    const description = b.description.value.trim(); if (!description){ fieldErr(b.description, "Describe what you found."); return; }
     const imm = b.level.value==="immediate";
     let notified = null;
     if (!imm && b.notified.value){
-      const d = validDate(b.notified.value); if (!d){ toast("Enter a valid date and time for the distributor notice.","bad"); return; }
-      if (d.getTime() > Date.now()+5*60000){ toast("The distributor notice time is in the future.","bad"); return; }
+      const d = validDate(b.notified.value); if (!d){ fieldErr(b.notified, "Enter a valid date and time for the distributor notice."); return; }
+      if (d.getTime() > Date.now()+5*60000){ fieldErr(b.notified, "The distributor notice time is in the future."); return; }
       notified = d.toISOString();
     }
     const at = now();
@@ -2666,6 +2721,9 @@ function hazardForm(j){
       gasShutOff:imm?false:b.gasShutOff.checked, tagAffixed:b.tagAffixed.checked, userNoticeGiven:b.userNotice.checked, tssaNotified:b.tssa.checked,
       distributorNotifiedAt:notified, status:"open", by:me()?.name||"", byId:S.userId, at, createdAt:at};
     if (notified){ rec.distributorNotifiedRecordedBy = rec.by; rec.distributorNotifiedRecordedAt = at; }
+    /* Marker for "rating changed after this tag": how many rating changes the equipment had when the tag was put on. */
+    const markEq = rec.equipmentId || j.equipmentId || null;
+    if (markEq){ const me0 = equipmentById(markEq); rec.ratingMark = {equipmentId:markEq, n:Array.isArray(me0?.ratingChanges) ? me0.ratingChanges.length : 0}; }
     if (imm) rec.writtenNoticeDueAt = new Date(ts(at)+14*DAY).toISOString();
     else rec.writtenNoticeDue = notified ? new Date(ts(notified)+14*DAY).toISOString() : null;
     const id = uid("hz"); if (!(await writeDoc("hazards/"+id, rec))) return;
@@ -2753,7 +2811,7 @@ function openHelpForm(j){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${icon("send","sm")} Send</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    const message = b.m.value.trim(); if (!message){ toast("Describe what you need help with.","bad"); return; }
+    const message = b.m.value.trim(); if (!message){ fieldErr(b.m, "Describe what you need help with."); return; }
     const rec = {message, by:me()?.name||"", byId:S.userId, at:now(), status:"open"};
     const id = await addDoc("jobs/"+j.id+"/help", rec); if (!id) return;
     sub(j.id).help.unshift(Object.assign({id}, rec));
@@ -2777,6 +2835,8 @@ function lastService(e){
   return done[0]||null;
 }
 const MAINT_TYPES = /furnace|boiler|heat pump|air cond|a\/c|\bac\b|water heater|hrv|erv|fireplace|rooftop|unit heater/i;
+/* Due for yearly maintenance, or its date can't be read (counted as due so it gets checked). */
+const maintDueOrUnreadable = e=>{ const m = maintenanceDue(e); return !!m && (!!m.overdue || !!m.unreadable); };
 function maintenanceDue(e){
   if (!MAINT_TYPES.test(e.type||"") && !/gas|propane|oil/i.test(e.fuel||"")) return null;
   /* Dates that can't be read are skipped; if no date can be read at all, the due date is "can't be read" (never thrown). */
@@ -2796,13 +2856,13 @@ function renderEquipment(){
     const q = S.ui.eqQ.trim().toLowerCase();
     let list = S.equipment.filter(e=>!q || [e.manufacturer,e.model,e.serial,e.type,customerById(e.siteCustomerId)?.name].filter(Boolean).some(v=>String(v).toLowerCase().includes(q)));
     if (isField()){ const mineCust = new Set(visibleJobs().map(j=>j.customerId)); list = list.filter(e=>mineCust.has(e.siteCustomerId)); }
-    if (S.ui.eqDue) list = list.filter(e=>maintenanceDue(e)?.overdue);
+    if (S.ui.eqDue) list = list.filter(maintDueOrUnreadable);
     const box = $("#list", wrap); box.innerHTML = "";
     if (!list.length){ box.appendChild(el(`<div class="card">${emptyState("box", S.equipment.length?"No equipment matches.":"No equipment recorded yet.")}</div>`)); return; }
     const t = el(`<div class="card pad0"><div class="tablewrap"><table><thead><tr><th>Equipment</th><th>Serial</th><th>Customer</th><th>Age</th><th>Status</th></tr></thead><tbody></tbody></table></div></div>`);
     list.forEach(e=>{
       const md = maintenanceDue(e); const hz = openHazards(h=>h.equipmentId===e.id).length;
-      const tags = [hz?`<span class="pill bad">Red tag</span>`:"", md?.overdue?`<span class="pill warn">Maintenance due</span>`:"", e.qrStatus==="active"?`<span class="pill ok">QR active</span>`:""].join(" ") || `<span class="faint small">—</span>`;
+      const tags = [hz?`<span class="pill bad">Red tag</span>`:"", md?.unreadable?`<span class="pill warn">Maintenance date can't be read</span>`:md?.overdue?`<span class="pill warn">Maintenance due</span>`:"", e.qrStatus==="active"?`<span class="pill ok">QR active</span>`:""].join(" ") || `<span class="faint small">—</span>`;
       const tr = el(`<tr class="click"><td><b>${esc(e.manufacturer)} ${esc(e.model)}</b><div class="tiny faint">${esc(e.type||"")}${e.fuel?" · "+esc(e.fuel):""}</div></td><td class="mono">${esc(e.serial||"—")}</td><td>${esc(customerById(e.siteCustomerId)?.name||"—")}</td><td>${esc(!e.installDate?"—":badDate(e.installDate)?"age unknown":Math.floor((Date.now()-ts(e.installDate))/(365.25*DAY))+" yr")}</td><td>${tags}</td></tr>`);
       tr.addEventListener("click", ()=>openEquipment(e.id)); $("tbody", t).appendChild(tr);
     });
@@ -2837,16 +2897,16 @@ function equipmentForm(e, presetCustomer){
     /* Whole number only ("60000", "60,000" or "60 000"). A dot is refused: "500.000" could mean 500 or 500,000. */
     const btuIn = b.inputBtuh.value.trim();
     if (btuIn){
-      if (/^\d[\d, ]*\.\d+$/.test(btuIn)){ toast("Input rating must be a whole number of BTU/h — no decimal point. Write 500000 or 500,000 (not 500.000).","bad"); return; }
-      if (!BTU_NUM.test(btuIn)){ toast("Input rating must be a whole number of BTU/h, e.g. 60000 or 60,000.","bad"); return; }
+      if (/^\d[\d, ]*\.\d+$/.test(btuIn)){ fieldErr(b.inputBtuh, "Input rating must be a whole number of BTU/h — no decimal point. Write 500000 or 500,000 (not 500.000)."); return; }
+      if (!BTU_NUM.test(btuIn)){ fieldErr(b.inputBtuh, "Input rating must be a whole number of BTU/h, e.g. 60000 or 60,000."); return; }
       const n = Number(btuIn.replace(/[, ]/g,""));
-      if (!Number.isSafeInteger(n)){ toast("That number is too large — check the rating plate.","bad"); return; }
-      if (n<BTU_MIN){ toast("Input rating under 1,000 BTU/h is not a real appliance rating — check the units on the rating plate (BTU/h, not MBH).","bad"); return; }
+      if (!Number.isSafeInteger(n)){ fieldErr(b.inputBtuh, "That number is too large — check the rating plate."); return; }
+      if (n<BTU_MIN){ fieldErr(b.inputBtuh, "Input rating under 1,000 BTU/h is not a real appliance rating — check the units on the rating plate (BTU/h, not MBH)."); return; }
       data.inputBtuh = n;
     }
     else data.inputBtuh = null;
     const missing = [["manufacturer","Manufacturer"],["model","Model"],["serial","Serial number"]].find(([k])=>!data[k]);
-    if (missing){ toast(`Enter the ${missing[1].toLowerCase()}.`,"bad"); return; }
+    if (missing){ fieldErr(b[missing[0]], `Enter the ${missing[1].toLowerCase()}.`); return; }
     const dup = S.equipment.find(x=>x.serial && String(x.serial).toLowerCase()===data.serial.toLowerCase() && x.id!==e?.id);
     /* confirmBox stacks over this form, so Cancel returns to the filled-in form. */
     if (dup && !(await confirmBox("Serial already on file", `${equipmentLabel(dup)} already uses serial ${dup.serial}. Save anyway?`, "Save anyway"))) return;
@@ -3018,7 +3078,7 @@ function customerForm(c){
   showModal(b);
   onSubmit(b, async ()=>{
     const d = {name:b.name.value.trim(), address:b.address.value.trim(), phone:b.phone.value.trim(), email:b.email.value.trim(), notes:b.notes.value.trim()};
-    if (!d.name){ toast("Enter the customer's name.","bad"); return; }
+    if (!d.name){ fieldErr(b.name, "Enter the customer's name."); return; }
     if (c){ if (!(await writeDoc("customers/"+c.id, d, true))) return; Object.assign(c, d); closeOverlay(); toast("Saved."); render(); return; }
     const id = uid("cust"); d.createdAt = now(); if (!(await writeDoc("customers/"+id, d))) return; S.customers.push(Object.assign({id}, d)); closeOverlay(); toast("Customer added."); openCustomer(id);
   });
@@ -3099,7 +3159,7 @@ function expenseTable(list){
         const b = el(`<form>${modalHead("Ask the technician", item.description)}<div class="field"><label>Your question *</label><textarea name="m" required placeholder="e.g. Can you add the supplier receipt?"></textarea></div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Send</button></div></form>`);
         showModal(b);
         onSubmit(b, async ()=>{
-          const m = b.m.value.trim(); if (!m){ toast("Type your question first.","bad"); return; }
+          const m = b.m.value.trim(); if (!m){ fieldErr(b.m, "Type your question first."); return; }
           if (await decideExpense(job, item, "clarify", m)) closeOverlay();
         });
       });
@@ -3147,7 +3207,7 @@ function renderReports(){
   const g = el(`<div class="grid g2 mt2"><div class="card"><div class="card-h"><h3>Jobs closed per week</h3><span class="hint">last 8 weeks</span></div><div class="bars">${weeks.map(w=>`<div class="b"><span class="n">${w.n}</span><div class="v" style="height:${w.n/max*100}%"></div><span class="l">${esc(w.l)}</span></div>`).join("")}</div></div>
     <div class="card"><div class="card-h"><h3>Closed jobs by technician</h3></div><div id="bt"></div></div>
     <div class="card"><div class="card-h"><h3>Jobs by type</h3><span class="hint">all time</span></div><div id="ty"></div></div>
-    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>!!effectiveLeak(j)).length}</div></div><div><div class="k">Leak tests passed</div><div class="v mono">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="pass").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono" style="color:var(--bad)">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="fail").length}</div></div><div><div class="k">Leak tests inconclusive / unknown</div><div class="v mono" style="color:var(--warn)">${S.jobs.filter(j=>["inconclusive","unknown"].includes(leakResultKind(effectiveLeak(j)))).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(e=>maintenanceDue(e)?.overdue).length}</div></div></div></div></div>`);
+    <div class="card"><div class="card-h"><h3>Safety</h3></div><div class="kv"><div><div class="k">Red tags recorded</div><div class="v mono">${S.hazards.length}</div></div><div><div class="k">Still open</div><div class="v mono">${openHazards().length}</div></div><div><div class="k">Leak tests recorded</div><div class="v mono">${S.jobs.filter(j=>!!effectiveLeak(j)).length}</div></div><div><div class="k">Leak tests passed</div><div class="v mono">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="pass").length}</div></div><div><div class="k">Leak tests failed</div><div class="v mono" style="color:var(--bad)">${S.jobs.filter(j=>leakResultKind(effectiveLeak(j))==="fail").length}</div></div><div><div class="k">Leak tests inconclusive / unknown</div><div class="v mono" style="color:var(--warn)">${S.jobs.filter(j=>["inconclusive","unknown"].includes(leakResultKind(effectiveLeak(j)))).length}</div></div><div><div class="k">Units with QR active</div><div class="v mono">${S.equipment.filter(e=>e.qrStatus==="active").length}</div></div><div><div class="k">Maintenance due</div><div class="v mono">${S.equipment.filter(maintDueOrUnreadable).length}</div></div></div></div></div>`);
   const hb = (rows)=>{ const m = Math.max(1, ...rows.map(r=>r[1])); return rows.length ? rows.map(([l,n])=>`<div class="hbar"><span>${esc(l)}</span><div class="track"><div style="width:${n/m*100}%"></div></div><span class="mono">${n}</span></div>`).join("") : `<div class="hint">No data yet.</div>`; };
   $("#bt", g).innerHTML = hb(fieldUsers().map(u=>[u.name, closed.filter(j=>j.technicianId===u.id).length]).sort((a,b)=>b[1]-a[1]));
   $("#ty", g).innerHTML = hb(JOB_TYPES.map(t=>[cap(t), S.jobs.filter(j=>j.jobType===t).length]).filter(r=>r[1]>0).sort((a,b)=>b[1]-a[1]));
@@ -3192,9 +3252,11 @@ function userForm(u){
   onSubmit(b, async ()=>{
     const d = {name:b.name.value.trim(), email:b.email.value.trim(), role:b.role.value, trade:b.trade.value, supervisorId:b.supervisorId.value||null,
       gasLicence:GAS_LICENCES.includes(b.gasLicence.value)?b.gasLicence.value:"none", tssaCertNumber:b.tssaCertNumber.value.trim(), address:b.address.value.trim(), credentials:creds.filter(c=>String(c.name||"").trim()).map(c=>Object.assign({}, c, {name:String(c.name).trim()}))};
-    if (!d.name){ toast("Enter the person's full name.","bad"); return; }
+    if (!d.name){ fieldErr(b.name, "Enter the person's full name."); return; }
     if (u){
       d.active = b.active.checked;
+      /* Turning an account back on also clears the "duplicate setup owner" marker. */
+      if (d.active && u.setupDuplicateOf) d.setupDuplicateOf = null;
       if (!(await writeDoc("users/"+u.id, d, true))) return;
       Object.assign(u, d);
       /* If you edited the person you're viewing as, keep the role in step (or pick someone else if deactivated). */
@@ -3334,7 +3396,7 @@ function renderFeedback(){
   $("#add", wrap).addEventListener("click", ()=>{
     const b = el(`<form>${modalHead("Send feedback")}<div class="field"><label>Type</label><select name="category"><option>Missing field</option><option>Workflow</option><option>Bug</option><option>Idea</option></select></div><div class="field mt"><label>Details *</label><textarea name="text" required></textarea></div><div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Send</button></div></form>`);
     showModal(b);
-    onSubmit(b, async ()=>{ const text = b.text.value.trim(); if (!text){ toast("Type the details first.","bad"); return; } const rec = {category:b.category.value, text, status:"New", by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()}; const id = await addDoc("feedback", rec); if (!id) return; S.feedback.push(Object.assign({id}, rec)); await notify(`New feedback from ${rec.by}.`, {toRole:"owner"}); closeOverlay(); toast("Thanks — sent."); render(); });
+    onSubmit(b, async ()=>{ const text = b.text.value.trim(); if (!text){ fieldErr(b.text, "Type the details first."); return; } const rec = {category:b.category.value, text, status:"New", by:me()?.name||ROLE_LABELS[S.role], byId:S.userId, at:now()}; const id = await addDoc("feedback", rec); if (!id) return; S.feedback.push(Object.assign({id}, rec)); await notify(`New feedback from ${rec.by}.`, {toRole:"owner"}); closeOverlay(); toast("Thanks — sent."); render(); });
   });
   const list = S.feedback.slice().sort((a,b)=>ts(b.at)-ts(a.at));
   if (!list.length) $("#l", wrap).appendChild(el(`<div class="card">${emptyState("message","No feedback yet.")}</div>`));
