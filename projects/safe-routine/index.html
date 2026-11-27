@@ -87,8 +87,9 @@ svg.i.lg{width:22px; height:22px}
 .iconbtn{position:relative; display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 .iconbtn:hover{background:var(--surface2)}
 .iconbtn .dot{position:absolute; top:-5px; right:-5px; background:var(--brand-red); color:#fff; font-size:10.5px; font-weight:700; border-radius:20px; padding:1px 6px; border:2px solid var(--bg)}
-#banner{margin:14px 24px 0; padding:9px 13px; border-radius:10px; background:color-mix(in srgb, var(--warn) 12%, var(--surface)); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); color:var(--text); font-size:13px; display:flex; flex-direction:column; gap:6px}
+#banner{position:sticky; top:var(--top-h,63px); z-index:29; margin:14px 24px 0; padding:9px 13px; border-radius:10px; background:color-mix(in srgb, var(--warn) 12%, var(--surface)); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); color:var(--text); font-size:13px; display:flex; flex-direction:column; gap:6px}
 #banner .bl{display:flex; gap:8px; align-items:flex-start}
+#banner .short{display:none}
 #main{padding:20px 24px 90px; max-width:1280px; width:100%}
 #tabbar{display:none}
 
@@ -302,7 +303,8 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
   #side{display:none}
   #top{padding:10px 16px}
   .searchbtn{min-width:0; width:38px; height:38px; padding:0; justify-content:center} .searchbtn span,.searchbtn kbd{display:none}
-  #banner{margin:12px 16px 0}
+  #banner{margin:8px 12px 0; padding:6px 10px; font-size:12px; line-height:1.35; gap:4px}
+  #banner .long{display:none} #banner .short{display:inline}
   #main{padding:16px 16px calc(96px + env(safe-area-inset-bottom,0px))}
   .g2,.g3{grid-template-columns:minmax(0,1fr)}
   .board{grid-template-columns:repeat(6,minmax(240px,1fr))}
@@ -461,6 +463,7 @@ const QR_CONSENT_VERSION = "qr-consent v0.1 (draft, not yet legally reviewed)";
 /* Shown on every screen until the safety rules are checked by a qualified reviewer. Set to true only after that approval. */
 const RULES_APPROVED = false;
 const RULES_WARNING = "Safety rules not yet approved against Ontario gas and building codes (TSSA). Do not use for real work.";
+const LOGIN_WARNING = "Prototype: “Viewing as” can pick any user, so the licence rules (G3/G2/G1) are not real security until a real login is added.";
 /* Gas licence on each user: "none" | "G3" | "G2" | "G1" (G1 is the highest). */
 const GAS_LICENCES = ["none","G3","G2","G1"];
 const LIC_RANK = {none:0, G3:1, G2:2, G1:3};
@@ -637,7 +640,7 @@ async function boot(){
     const ok = await loadAll();
     if (!ok){ db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll(); }
     /* Live db: never write example data. Empty team (and every read worked) = first start. */
-    else if (!S.loadErrors.length && !activeUsers().length){ showSetup(); return; }
+    else if (!S.loadErrors.length && !S.users.length){ showSetup(); return; }
   } else {
     db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll();
   }
@@ -689,14 +692,32 @@ function showSetup(){
     /* Someone may have finished setup on another device. */
     let snap;
     try{ snap = await db.collection("users").get(); }catch(e){ console.error(e); toast("Couldn't check the team list. Try again.","bad"); return; }
-    if (snap.docs.some(d=>d.data()?.active!==false)){ toast("This company was already set up. Loading it now."); await loadAll(); wrap.remove(); restoreUser(); return; }
+    if (snap.docs.length){ toast("This company was already set up. Loading it now."); await loadAll(); wrap.remove(); restoreUser(); return; }
     if (!S.configExists || S.config.companyName!==companyName){ if (!(await writeConfig({companyName}))) return; S.config.companyName = companyName; }
     const id = uid("user");
     const u = {name, email:"", role:"owner", trade:S.config.activeTheme||"hvac", supervisorId:null, credentials:[],
-      gasLicence:GAS_LICENCES.includes(f.gasLicence.value)?f.gasLicence.value:"none", tssaCertNumber:f.tssaCertNumber.value.trim(), address:"", active:true, createdAt:now()};
+      gasLicence:GAS_LICENCES.includes(f.gasLicence.value)?f.gasLicence.value:"none", tssaCertNumber:f.tssaCertNumber.value.trim(), address:"", active:true, createdAt:now(), setupOwner:true};
     if (!(await writeDoc("users/"+id, u))) return;
-    const nu = Object.assign({id}, u); normalizeUser(nu); S.users.push(nu);
-    wrap.remove(); setUser(id, true); toast(`Welcome, ${firstName(name)}. Add your team under Team.`);
+    /* Two devices may finish setup at the same moment. Re-read: the earliest setup owner (createdAt, then id) is kept,
+       every later one is turned off. Each device applies the same rule, so they agree. */
+    let warn = "";
+    try{
+      const all = (await db.collection("users").get()).docs.map(d=>Object.assign({id:d.id}, d.data()));
+      const firsts = all.filter(x=>x.setupOwner && x.role==="owner" && x.active!==false)
+        .sort((a,b)=> (ts(a.createdAt)||0)-(ts(b.createdAt)||0) || String(a.id).localeCompare(String(b.id)));
+      if (firsts.length>1){
+        const keep = firsts[0];
+        for (const x of firsts.slice(1)) await writeDoc("users/"+x.id, {active:false, setupDuplicateOf:keep.id}, true, true);
+        warn = keep.id===id
+          ? "Another owner account was created at the same moment on another device. It was turned off; yours is kept."
+          : `Someone else (${keep.name||"another person"}) finished setup a moment earlier on another device. Their owner account is kept and yours was turned off. Ask them to add you under Team.`;
+      }
+    }catch(e){ console.error(e); warn = "Couldn't double-check the team list after setup. Reload and check Team for a second owner account."; }
+    await loadAll();
+    wrap.remove();
+    if (!setUser(id, true)) restoreUser();
+    if (warn){ toast(warn, "bad"); const m = $("#main"); if (m) m.prepend(el(`<div class="callout bad" style="margin-bottom:12px">${icon("alert","sm")}<div>${esc(warn)}</div></div>`)); }
+    else toast(`Welcome, ${firstName(name)}. Add your team under Team.`);
   });
 }
 function normalizeUser(u){
@@ -854,8 +875,15 @@ const isImmediate = h=> h.hazardLevel==="immediate";
 const hazardSteps = h=> isImmediate(h) ? HZ_STEPS : HZ_STEPS.slice(2);
 const hazardAt = h=> h.createdAt || h.at;
 /* Immediate hazard: written notice due 14 days after the red tag. Older / non-immediate records keep their stored due date. */
-function noticeDue(h){ return h.writtenNoticeDueAt || (isImmediate(h) && hazardAt(h) ? new Date(ts(hazardAt(h))+14*DAY).toISOString() : h.writtenNoticeDue) || null; }
-function noticeOverdue(h){ const d = noticeDue(h); return !h.writtenNoticeSentAt && !!d && Date.now() > ts(d); }
+/* A date that can't be read is returned as "invalid" and counted as overdue (needs attention) — never thrown. */
+function noticeDue(h){
+  if (h.writtenNoticeDueAt) return h.writtenNoticeDueAt;
+  if (isImmediate(h) && hazardAt(h)){ const t = ts(hazardAt(h)); return Number.isFinite(t) ? new Date(t+14*DAY).toISOString() : "invalid"; }
+  return h.writtenNoticeDue || null;
+}
+const badDate = d=> !!d && !Number.isFinite(ts(d));
+const dueText = d=> badDate(d) ? "an unreadable date (check the record)" : fmtDateOnly(d);
+function noticeOverdue(h){ const d = noticeDue(h); return !h.writtenNoticeSentAt && !!d && (badDate(d) || Date.now() > ts(d)); }
 
 /* ------------------------------ SEEN / NEW BADGES ------------------------------ */
 const TRACKED = ["notes","media","materials"];
@@ -893,7 +921,9 @@ function navFor(role){
   }[role] || [];
   return N.filter(([k])=> k!=="skills" || m.skillPassport);
 }
-function navCount(key){
+/* A bad record must never break the menu: on any error the count is shown as "!" (needs attention). */
+function navCount(key){ try{ return navCount0(key); }catch(e){ console.error("navCount", key, e); return "!"; } }
+function navCount0(key){
   if (key==="review") return S.jobs.filter(j=>j.status==="completion_review").length;
   if (key==="help") return S.jobs.reduce((n,j)=> n+sub(j.id).help.filter(h=>h.status!=="resolved").length, 0);
   if (key==="expenses") return allExpenses().filter(x=>(x.item.status||"pending")==="pending").length;
@@ -937,7 +967,8 @@ function go(tab){ S.view = {tab, jobId:null, jobTab:"overview", equipmentId:null
 function openJob(id, tab){
   const j = jobById(id); if (!j) return;
   S.view.jobId = id; S.view.jobTab = tab||"overview"; closeOverlay(); render(); window.scrollTo(0,0);
-  loadJobSub(id).then(()=>{
+  /* Also re-read red tags, so "left safe" and the safety items are shown against the latest tags. */
+  Promise.all([loadJobSub(id), freshHazards({quiet:true, noRender:true})]).then(()=>{
     if (S.view.jobId!==id) return;
     /* Don't wipe what the user has started typing: skip the main re-render while a field has unsaved text. */
     if (hasDraft($("#main"))){ renderSide(); renderTabbar(); showRefreshHint(); return; }
@@ -971,12 +1002,20 @@ function applyTheme(){
 function render(){
   applyTheme(); renderSide(); renderTop(); renderBanner(); renderTabbar(); renderMain();
 }
+/* Same protection as renderMain: an error in one record shows a short message instead of stopping the app. */
+function safeDraw(sel, fn, what){
+  try{ fn(); }
+  catch(e){ console.error(e); const n = $(sel); if (n) n.innerHTML = `<div class="hint" style="padding:8px">Something went wrong showing ${esc(what)}. ${esc(e.message)}</div>`; }
+}
+function renderSide(){ safeDraw("#side", drawSide, "the menu"); }
+function renderTop(){ safeDraw("#top", drawTop, "the top bar"); }
+function renderTabbar(){ safeDraw("#tabbar", drawTabbar, "the menu"); }
 function pageTitle(){
   if (S.view.jobId){ const j = jobById(S.view.jobId); return j ? j.refNumber : "Job"; }
   const item = navFor(S.role).find(([k])=>k===S.view.tab);
   return item ? item[1] : "SafeRoutine";
 }
-function renderSide(){
+function drawSide(){
   const side = $("#side"); const u = me();
   side.innerHTML = `
     <div class="brand">${brandMark(36)}<div><div class="name">Safe<b>Routine</b></div><div class="co">${esc(S.config.companyName||"")}</div></div></div>
@@ -998,7 +1037,7 @@ function isDark(){
   const pref = lsGet("sr_display") || S.config.theme || "system";
   return pref==="dark" || (pref==="system" && !!window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
 }
-function renderTop(){
+function drawTop(){
   const top = $("#top"); const unread = unreadCount();
   const dark = isDark();
   top.innerHTML = `
@@ -1020,15 +1059,19 @@ function goBack(){
   else if (S.view.customerId){ S.view.customerId = null; }
   render(); window.scrollTo(0,0);
 }
+/* The sticky banner sits just below the sticky top bar; keep its offset equal to the bar's real height. */
+function syncTopH(){ const t = $("#top"); if (t) document.documentElement.style.setProperty("--top-h", t.offsetHeight+"px"); }
+if (window.ResizeObserver) new ResizeObserver(syncTopH).observe(document.getElementById("top")); else window.addEventListener("resize", syncTopH);
 function renderBanner(){
   const b = $("#banner"); const rows = [];
-  if (!RULES_APPROVED) rows.push(`${icon("alert","sm")}<span><b>${esc(RULES_WARNING)}</b></span>`);
-  if (mode==="preview") rows.push(`${icon("eye","sm")}<span><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span>`);
+  /* .long on wider screens, .short on phones (the banner stays on screen, so it must stay small there). */
+  if (!RULES_APPROVED) rows.push(`${icon("alert","sm")}<span class="long"><b>${esc(RULES_WARNING)}</b> ${esc(LOGIN_WARNING)}</span><span class="short"><b>Safety rules not approved (TSSA) — not for real work.</b> “Viewing as” is not real security.</span>`);
+  if (mode==="preview") rows.push(`${icon("eye","sm")}<span class="long"><b>Preview mode.</b> Shared storage isn't reachable here, so example data is shown and changes last only until you reload.</span><span class="short"><b>Preview:</b> example data, lost on reload.</span>`);
   else if (S.loadErrors.length) rows.push(`${icon("alert","sm")}<span><b>Some data couldn't be loaded</b> (${esc(S.loadErrors.join(", "))}). What you see may be incomplete — reload to try again before relying on it.</span>`);
   b.hidden = !rows.length;
   b.innerHTML = rows.map(r=>`<div class="bl">${r}</div>`).join("");
 }
-function renderTabbar(){
+function drawTabbar(){
   const bar = $("#tabbar"); bar.innerHTML = "";
   const items = navFor(S.role); const main = items.slice(0,4);
   main.forEach(([k,label,ic])=>{
@@ -1357,7 +1400,7 @@ function dashSupervisor(){
   wrap.appendChild(el(`<div class="grid g4">${kpi("Awaiting review", review.length, "checkcircle","",review.length>0)}${kpi("Open help requests", help.length, "lifebuoy","",help.length>0)}${kpi("Crew active now", onsite.length, "users")}${kpi("Open red tags", openHazards().length, "tag","",openHazards().length>0)}</div>`));
   const od = S.hazards.filter(noticeOverdue);
   if (od.length){
-    const a = el(`<div class="stack mt">${od.map(h=>`<div class="callout bad" data-hz="${esc(h.id)}" style="cursor:pointer">${icon("tag")}<div><b>Overdue — written notice to the gas utility.</b> ${esc(equipmentLabel(equipmentById(h.equipmentId)))} at ${esc(customerById(h.customerId)?.name||"site")} · was due ${esc(fmtDateOnly(noticeDue(h)))}</div></div>`).join("")}</div>`);
+    const a = el(`<div class="stack mt">${od.map(h=>`<div class="callout bad" data-hz="${esc(h.id)}" style="cursor:pointer">${icon("tag")}<div><b>Overdue — written notice to the gas utility.</b> ${esc(equipmentLabel(equipmentById(h.equipmentId)))} at ${esc(customerById(h.customerId)?.name||"site")} · was due ${esc(dueText(noticeDue(h)))}</div></div>`).join("")}</div>`);
     $$("[data-hz]", a).forEach(n=>n.addEventListener("click", ()=>{ const h = S.hazards.find(x=>x.id===n.dataset.hz); if (!h) return; if (h.jobId && jobById(h.jobId)) openJob(h.jobId, "safety"); else if (h.equipmentId) openEquipment(h.equipmentId); }));
     wrap.appendChild(a);
   }
@@ -1407,7 +1450,7 @@ function ownerAlerts(){
     const parts = [];
     if (isImmediate(h)) parts.push("Immediate hazard.");
     if (missing) parts.push(`${missing} of steps 1–3 not recorded.`);
-    if (noticeOverdue(h)) parts.push(`Overdue — written notice to the gas utility was due ${fmtDateOnly(due)}.`);
+    if (noticeOverdue(h)) parts.push(`Overdue — written notice to the gas utility was due ${dueText(due)}.`);
     else if (!h.writtenNoticeSentAt && d!==null) parts.push(`Written notice to the gas utility due in ${d} day(s).`);
     else if (!h.writtenNoticeSentAt) parts.push("Record when the gas utility was told.");
     out.push({c:"bad", ic:"tag", t:`${h.status==="resolved"?"Removed red tag":"Red tag"}: ${equipmentLabel(equipmentById(h.equipmentId))} at ${customerById(h.customerId)?.name||"site"}`,
@@ -1573,7 +1616,7 @@ function renderJob(id){
   if (!closed && isField() && j.technicianId===S.userId){ const h = el(`<button class="btn lg">${icon("lifebuoy")} Ask supervisor</button>`); h.addEventListener("click", ()=>openHelpForm(j)); bar.appendChild(h); }
   if (bar.children.length) wrap.appendChild(bar);
 
-  const leakOn = !!S.config.modules.leakTest;
+  const leakOn = !!S.config.modules.leakTest || leakNotPassed(j); /* a failed result stays reachable for a re-test */
   const tabs = [["overview","Overview","home"],["readings","Readings","gauge"],["notes","Notes","pencil","notes"],["media","Photos","image","media"]]
     .concat(leakOn?[["leak","Leak test","droplet"]]:[])
     .concat([["materials","Materials","receipt","materials"],["safety","Safety","tag"],["completion","Checklist","clipboard"],["timeline","Timeline","history"]]);
@@ -1619,7 +1662,7 @@ function jobOverview(j, s){
     $("#hl", help).appendChild(n);
   });
   $("#r", g).appendChild(help);
-  if (S.config.modules.leakTest) $("#r", g).appendChild(el(`<div class="card"><div class="card-h"><h3>Leak test</h3></div>${leakChip(j)}</div>`));
+  if (S.config.modules.leakTest || leakNotPassed(j)) $("#r", g).appendChild(el(`<div class="card"><div class="card-h"><h3>Leak test</h3></div>${leakChip(j)}</div>`));
   const e = equipmentById(j.equipmentId);
   if (e){ const ec = el(`<div class="card"><div class="card-h"><h3>Equipment</h3><button class="btn sm ghost">Passport ${icon("chev","sm")}</button></div><div style="font-weight:700">${esc(equipmentLabel(e))}</div><div class="hint mono">S/N ${esc(e.serial||"—")}</div><div class="hint">${esc(equipmentAge(e))}</div></div>`); $("button", ec).addEventListener("click", ()=>openEquipment(e.id)); $("#r", g).appendChild(ec); }
   else if (can.editJob() && !isClosed(j)){ const ec = el(`<div class="card"><div class="card-h"><h3>Equipment</h3></div><div class="hint">No equipment linked. Linking builds the unit's service history.</div><button class="btn sm mt">${icon("plus","sm")} Link equipment</button></div>`); $("button", ec).addEventListener("click", ()=>openJobForm(j)); $("#r", g).appendChild(ec); }
@@ -1656,7 +1699,7 @@ async function advanceJob(j){
       const missing = completionItems(j).filter(i=>!i.ok);
       if (missing.length){ toast("Before submitting, add: "+missing.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return; }
     }
-    const patch = {status:next}; if (next==="completion_review") patch.submittedAt = now();
+    const patch = {status:next}; if (next==="completion_review"){ patch.submittedAt = now(); patch.submittedById = me()?.id||null; patch.submittedBy = me()?.name||""; }
     if (next==="arrived") patch.arrivedAt = now();
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
     Object.assign(j, patch);
@@ -1667,31 +1710,53 @@ async function advanceJob(j){
     render();
   });
 }
+/* Did this person work on the job? Assigned technician, the person who submitted it, or anyone who recorded
+   field work on it (notes, photos, expenses, readings, leak test, red tag, or a submit). Uses the loaded sub-collections. */
+const FIELD_EVENTS = new Set(["readings","leak","hazard"]);
+function workedOnJob(j, userId){
+  if (!userId) return false;
+  if (j.technicianId===userId || j.submittedById===userId) return true;
+  const s = sub(j.id);
+  if (["notes","media","materials"].some(k=>(s[k]||[]).some(x=>x.byId===userId))) return true;
+  return (s.events||[]).some(e=>e.byId===userId && (FIELD_EVENTS.has(e.type) || (e.type==="status" && e.status==="completion_review")));
+}
+const SELF_APPROVE_MSG = "Only a G2 or G1 can approve a job they worked on. Another supervisor (G2 or higher) must approve.";
 async function approveJob(j){
   return once("status:"+j.id, async ()=>{
-    if (!(await freshJob(j, ["completion_review"]))) return;
-    /* Approving your own job needs a G2 or G1. */
-    const selfApproved = !!j.technicianId && j.technicianId===S.userId;
-    if (selfApproved && !hasLic(me(), "G2")){ toast("A G3 cannot approve their own job. Another supervisor (G2 or higher) must approve.", "bad"); return; }
-    if (!(await freshHazards())) return;
-    const hardStop = ()=>{ const hard = completionItems(j).filter(i=>!i.ok && i.safety); if (hard.length){ toast("Can't close — safety items can't be skipped: "+hard.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); } return hard.length>0; };
-    if (hardStop()) return;
-    const missing = completionItems(j).filter(i=>!i.ok);
+    /* The approver is fixed when the button is pressed, even if "Viewing as" changes while a box is open. */
+    const approver = me();
+    if (!approver){ toast("Choose who you are first.", "bad"); return; }
+    /* Re-read the job, its details and the red tags, then check who may approve and what is missing. null = stop. */
+    const check = async ()=>{
+      if (!(await freshJob(j, ["completion_review"]))) return null;
+      if (!(await loadJobSub(j.id))){ toast("Couldn't check the latest job details. Try again.", "bad"); return null; }
+      if (!(await freshHazards({noRender:true}))) return null;
+      const self = workedOnJob(j, approver.id);
+      if (self && !hasLic(approver, "G2")){ toast(SELF_APPROVE_MSG, "bad"); render(); return null; }
+      const items = completionItems(j);
+      const hard = items.filter(i=>!i.ok && i.safety);
+      if (hard.length){ toast("Can't close — safety items can't be skipped: "+hard.map(m=>m.label).join(", ")+".", "bad"); S.view.jobTab="completion"; render(); return null; }
+      return {self, missing:items.filter(i=>!i.ok)};
+    };
+    const c1 = await check(); if (!c1) return;
     let reason = null;
-    if (missing.length){
-      reason = await promptBox("Close with items missing?", "Still missing: "+missing.map(m=>m.label).join(", ")+". Say why you are closing anyway. The reason is saved in the timeline.", "Close anyway");
+    if (c1.missing.length){
+      reason = await promptBox("Close with items missing?", "Still missing: "+c1.missing.map(m=>m.label).join(", ")+". Say why you are closing anyway. The reason is saved in the timeline.", "Close anyway");
       if (!reason) return;
     }
-    if (!(await freshJob(j, ["completion_review"]))) return;
-    if (!(await freshHazards()) || hardStop()) return;
-    const review = {decision:"approved", by:me()?.name||"Supervisor", at:now()};
+    /* Check again just before writing: something may have changed while the reason was being typed. */
+    const c2 = await check(); if (!c2) return;
+    if (c2.missing.some(m=>!c1.missing.some(x=>x.label===m.label))){ toast("The checklist changed while you were deciding. Check it and try again.", "bad"); S.view.jobTab="completion"; render(); return; }
+    const missing = c2.missing, selfApproved = c2.self;
+    if (!missing.length) reason = null;
+    const review = {decision:"approved", by:approver.name||"Supervisor", byId:approver.id, at:now()};
     if (selfApproved) review.selfApproved = true;
     if (reason){ review.overrideReason = reason; review.overrideItems = missing.map(m=>m.label); }
     const patch = {status:"completed", closedAt:now(), review};
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
     Object.assign(j, patch);
-    await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"+(selfApproved?" · self-approved":"")+(reason?` · closed with items missing (${review.overrideItems.join(", ")}). Reason: ${reason}`:"")});
-    if (j.technicianId) await notify(`${patch.review.by} approved ${j.refNumber}. It's closed and in the archive.`, {toUser:j.technicianId, jobId:j.id});
+    await logEvent(j.id, "status", {status:"completed", note:"Approved and closed"+(selfApproved?" · self-approved":"")+(reason?` · closed with items missing (${review.overrideItems.join(", ")}). Reason: ${reason}`:""), by:approver.name||"Supervisor", byId:approver.id});
+    if (j.technicianId) await notify(`${patch.review.by} approved ${j.refNumber}. It's closed and in the archive.`, {toUser:j.technicianId, jobId:j.id, fromId:approver.id});
     toast(`${j.refNumber} closed and moved to the Archive.`); render();
   });
 }
@@ -1741,8 +1806,12 @@ function techWarnings(techId, whenIso, trade, excludeId){
 }
 function openJobForm(j){
   const editing = !!j;
+  /* While in review the technician and equipment are fixed; equipment with an open red tag stays linked. */
+  const inReview = editing && j.status==="completion_review";
+  const eqLocked = inReview || (editing && !!j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length>0);
   const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
-  const techOpts = `<option value="">Unassigned</option>`+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
+  const curTech = j?.technicianId && !fieldUsers().some(u=>u.id===j.technicianId) ? userById(j.technicianId) : null;
+  const techOpts = `<option value="">Unassigned</option>`+(curTech?`<option value="${esc(curTech.id)}" selected>${esc(userLabel(curTech))}</option>`:"")+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
       <div class="field"><label>Customer *</label><select name="customerId" required><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select></div>
@@ -1751,11 +1820,11 @@ function openJobForm(j){
       <div class="field newc" hidden><label>Phone</label><input name="newPhone" type="tel"></div>
       <div class="field" style="grid-column:1/-1"><label>Service address *</label><input name="siteAddress" required value="${esc(j?.siteAddress||"")}" placeholder="Street, city, province"></div>
       <div class="field"><label>Date &amp; time *</label><input type="datetime-local" name="scheduledAt" required value="${esc(toLocalInput(j?.scheduledAt))}"></div>
-      <div class="field"><label>Technician</label><select name="technicianId">${techOpts}</select></div>
+      <div class="field"><label>Technician</label><select name="technicianId" ${inReview?"disabled":""}>${techOpts}</select>${inReview?`<div class="hint">Locked while waiting for review.</div>`:""}</div>
       <div class="field"><label>Trade *</label><select name="requiredTrade">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${(j?.requiredTrade||S.config.activeTheme)===k?"selected":""}>${esc(v.label)}</option>`).join("")}</select></div>
       <div class="field"><label>Job type *</label><select name="jobType">${JOB_TYPES.map(t=>`<option value="${t}" ${j?.jobType===t?"selected":""}>${cap(t)}</option>`).join("")}</select></div>
       <div class="field"><label>Priority *</label><select name="priority">${PRIORITIES.map(p=>`<option value="${p}" ${(j?.priority||"normal")===p?"selected":""}>${cap(p)}</option>`).join("")}</select></div>
-      <div class="field"><label>Equipment</label><select name="equipmentId"></select></div>
+      <div class="field"><label>Equipment</label><select name="equipmentId" ${eqLocked?"disabled":""}></select>${eqLocked?`<div class="hint">${inReview?"Locked while waiting for review.":"Locked: this equipment has an open red tag."}</div>`:""}</div>
     </div>
     ${editing?"":`<div class="field mt"><label>Notes for the technician</label><textarea name="notes" placeholder="Gate code, parking, what the customer reported…"></textarea></div>`}
     <div id="warn" class="stack tight mt"></div>
@@ -1763,7 +1832,7 @@ function openJobForm(j){
   showModal(b, {wide:true});
   const f = b;
   function fillEquip(){
-    const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid);
+    const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid || e.id===j?.equipmentId);
     f.equipmentId.innerHTML = `<option value="">None</option>`+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
   }
   function warn(){
@@ -1799,6 +1868,13 @@ function openJobForm(j){
       const changes = Object.keys(data).filter(k=>String(j[k]??"")!==String(data[k]??""));
       if (!changes.length){ closeOverlay(); return; }
       if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
+      const changed = k=> String(j[k]??"")!==String(data[k]??"");
+      if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
+      if (changed("equipmentId")){
+        if (j.status==="completion_review"){ toast("The equipment can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
+        if (!(await freshHazards({noRender:true}))) return;
+        if (j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length){ toast("This equipment has an open red tag. It can't be unlinked or swapped until the red tag is removed.","bad"); return; }
+      }
       const prevTech = j.technicianId;
       if (!(await writeDoc("jobs/"+j.id, data, true))) return;
       Object.assign(j, data);
@@ -1829,6 +1905,15 @@ function readingDef(j){
   }
   return Object.assign({refrigerant:j.requiredTrade==="refrigeration"}, base);
 }
+/* "Left in safe operating condition" counts only if the readings were saved after the newest red-tag removal
+   on this job or its equipment. A missing or unreadable date does not count. */
+function leftSafeOk(j){
+  const r = j.readings||{}; if (!r.leftSafe) return false;
+  const cleared = S.hazards.filter(h=>h.status==="resolved" && (h.jobId===j.id || (j.equipmentId && h.equipmentId===j.equipmentId))).map(h=>ts(h.clearedAt||h.resolvedAt));
+  if (!cleared.length) return true;
+  const saved = ts(r.savedAt);
+  return Number.isFinite(saved) && cleared.every(c=>Number.isFinite(c) && saved > c);
+}
 /* Readings that can legitimately be below zero (suction can be in vacuum; outdoor air can be below 0 °F). */
 const NEG_OK_READINGS = new Set(["suction","outdoor"]);
 function jobReadings(j, s){
@@ -1841,6 +1926,8 @@ function jobReadings(j, s){
   const tagged = k=> k==="leftSafe" && imm.length>0;
   const checkRow = ([k,label,req])=> tagged(k)
     ? `<div class="check" style="align-items:center"><span class="pill bad">${icon("tag","sm")} Appliance is red-tagged — gas shut off</span>${imm.every(h=>h.gasShutOffAt)?"":`<span class="hint">Record the gas shut-off time on the red tag (Safety tab).</span>`}</div>`
+    : k==="leftSafe" && r.leftSafe && !leftSafeOk(j)
+    ? `<label class="check"><input type="checkbox" name="${k}" ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}<div class="hint">A red tag was removed after this was last saved. Tick it again to confirm.</div></span></label>`
     : `<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`;
   const form = el(`<form class="card"><div class="card-h"><div><h3>${esc(THEMES[j.requiredTrade]?.label||"")} readings</h3><div class="hint">Type what your instruments show. Leave blank what you didn't measure — nothing is filled in for you.</div></div></div>
     ${inReview && !isClosed(j)?`<div class="callout mt" style="margin-bottom:12px">${icon("lock","sm")}<div>Readings are locked while the job is in review. A supervisor can send it back if something needs changing.</div></div>`:""}
@@ -1852,20 +1939,25 @@ function jobReadings(j, s){
     ${r.savedBy?`<div class="hint mt">Last saved by ${esc(r.savedBy)} · ${esc(ago(r.savedAt))}</div>`:""}</form>`);
   onSubmit(form, async ()=>{
     const out = {};
+    const prev = j.readings||{};
+    /* Saving with nothing left is allowed when it removes values that were stored before (e.g. unticking a check). */
+    const hadAny = def.fields.some(([k])=>prev[k]!==undefined && prev[k]!=="") || def.checks.some(([k])=>prev[k]);
     def.fields.forEach(([k])=>{ const v = form[k].value.trim(); if (v!=="") out[k]=v; });
     def.checks.forEach(([k])=>{ if (form[k] && form[k].checked) out[k]=true; });
     if (form.refrigerant && form.refrigerant.value.trim()) out.refrigerant = form.refrigerant.value.trim();
     /* The refrigerant type can be pre-filled from the equipment, so it alone doesn't count as a reading. */
-    if (!def.fields.some(([k])=>out[k]!==undefined) && !def.checks.some(([k])=>out[k])){ toast("Enter at least one reading.","bad"); return; }
+    const isEmpty = !def.fields.some(([k])=>out[k]!==undefined) && !def.checks.some(([k])=>out[k]);
+    if (isEmpty && !hadAny){ toast("Enter at least one reading.","bad"); return; }
     const bad = def.fields.filter(([k])=> out[k]!==undefined && parseNum(out[k], NEG_OK_READINGS.has(k))===null);
     if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
+    if (!(await freshHazards())) return;
     if (jobHazards(j).some(isImmediate)) delete out.leftSafe;
     if (j.requiredTrade==="hvac" && Number(out.coAirFree)>=400) toast("Flue CO is very high. Check the appliance and consider a red tag before leaving.","bad");
     out.savedBy = me()?.name||""; out.savedAt = now();
     if (!(await writeDoc("jobs/"+j.id, {readings:out}, true))) return;
     j.readings = out;
-    await logEvent(j.id, "readings", {note:`${Object.keys(out).length-2} reading(s)/check(s) saved`});
+    await logEvent(j.id, "readings", {note:isEmpty ? "Readings cleared" : `${Object.keys(out).length-2} reading(s)/check(s) saved`});
     toast("Readings saved."); renderMain();
   });
   wrap.appendChild(form);
@@ -1966,6 +2058,16 @@ function leakResultKind(lt){
   if (/inconclusive/i.test(r)) return "inconclusive";
   return "unknown";
 }
+/* The latest COMPLETED result across the current test and the history (history is kept in the order it was replaced).
+   "Skipped" or "not recorded" never replaces a completed result — only a new completed result does. */
+function effectiveLeak(j){
+  const all = (Array.isArray(j.leakHistory) ? j.leakHistory : []).concat(j.leakTest ? [j.leakTest] : []);
+  for (let i = all.length-1; i>=0; i--) if (all[i] && all[i].status==="completed") return all[i];
+  return null;
+}
+/* true when the effective result is Fail / Inconclusive / unknown (anything but an explicit Pass). */
+const leakNotPassed = j=>{ const k = leakResultKind(effectiveLeak(j)); return !!k && k!=="pass"; };
+const LEAK_SKIP_BLOCKED = "A failed or inconclusive leak test needs a passing re-test or a red tag.";
 function leakChip(j){
   const lt = j.leakTest||{status:"not_set"};
   if (lt.status==="completed"){
@@ -1984,20 +2086,28 @@ function leakPatch(j, next){
   return {leakTest:next, leakHistory:hist};
 }
 function jobLeak(j){
-  const editable = can.fieldWork(j); const lt = j.leakTest||{status:"not_set"};
+  /* Locked while in review or closed: a re-test has to be recorded before submitting. */
+  const locked = !EDITABLE_READING_STATUSES.includes(j.status);
+  const editable = can.fieldWork(j) && !locked; const lt = j.leakTest||{status:"not_set"};
+  const skipBlocked = leakNotPassed(j) && !jobHazards(j).length;
+  const eff = effectiveLeak(j);
   const hist = Array.isArray(j.leakHistory) ? j.leakHistory : [];
-  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. A Fail or Inconclusive result stops the job from closing until a passing re-test is recorded or the appliance is red-tagged.</div></div></div>${leakChip(j)}<div class="actionbar mt" id="a"></div>
+  const wrap = el(`<div class="card"><div class="card-h"><div><h3>Leak test</h3><div class="hint">Record it or skip it with a reason. A Fail or Inconclusive result stops the job from closing until a passing re-test is recorded or the appliance is red-tagged.</div></div></div>${leakChip(j)}
+    ${lt.status!=="completed" && eff && leakNotPassed(j)?`<div class="callout bad mt">${icon("alert","sm")}<div><b>Last completed result: ${esc(eff.result||"not recorded")}</b> (${esc(fmtDate(eff.at))}). It still counts until a passing re-test is recorded${jobHazards(j).length?" — the appliance is red-tagged.":" or the appliance is red-tagged."}</div></div>`:""}
+    ${locked && !isClosed(j)?`<div class="callout mt">${icon("lock","sm")}<div>The leak test is locked while the job is in review. A supervisor can send it back if a re-test is needed.</div></div>`:""}
+    <div class="actionbar mt" id="a"></div>
     ${hist.length?`<h4 class="mt2" style="margin-bottom:6px">Earlier results</h4><div class="stack tight">${hist.slice().reverse().map(h=>`<div class="note"><div class="meta">${esc(h.by||"")} · ${esc(fmtDate(h.at))} · replaced ${esc(fmtDate(h.replacedAt))}${h.replacedBy?" by "+esc(h.replacedBy):""}</div>${esc(leakSummary(h))}${h.method?" · "+esc(h.method):""}${h.notes?" — "+esc(h.notes):""}</div>`).join("")}</div>`:""}</div>`);
   const a = $("#a", wrap);
   if (editable && lt.status==="not_set"){
     const c = el(`<button class="btn primary">${icon("droplet","sm")} Record leak test</button>`); c.addEventListener("click", ()=>leakForm(j));
-    const s = el(`<button class="btn">Skip</button>`); s.addEventListener("click", ()=>leakSkip(j));
+    const s = el(`<button class="btn" ${skipBlocked?"disabled":""}>Skip</button>`); s.addEventListener("click", ()=>leakSkip(j));
     a.append(c, s);
+    if (skipBlocked) a.appendChild(el(`<span class="hint">${esc(LEAK_SKIP_BLOCKED)}</span>`));
   } else if (editable){
     const r = el(`<button class="btn sm">${icon("undo","sm")} Change</button>`);
     r.addEventListener("click", withBusy(r, async ()=>{
       if (!(await confirmBox("Change the leak test?", `The current result (${leakSummary(lt)}) will be moved to “Earlier results” and logged in the timeline. You then record a new result or skip.`, "Change"))) return;
-      if (!(await freshJob(j, OPEN_STATUSES))) return;
+      if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
       const before = leakSummary(j.leakTest);
       const patch = leakPatch(j, {status:"not_set"});
       if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
@@ -2017,7 +2127,7 @@ function leakForm(j){
     <div class="mf"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`);
   showModal(b);
   onSubmit(b, async ()=>{
-    if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
+    if (!(await freshJob(j, EDITABLE_READING_STATUSES))){ closeOverlay(); return; }
     const lt = {status:"completed", result:b.result.value, method:b.method.value, notes:b.notes.value.trim(), at:now(), by:me()?.name||""};
     const patch = leakPatch(j, lt);
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
@@ -2035,7 +2145,9 @@ function leakSkip(j){
   showModal(b);
   onSubmit(b, async ()=>{
     const reason = b.reason.value.trim(); if (!reason){ toast("Give a reason for skipping the leak test.","bad"); return; }
-    if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
+    if (!(await freshJob(j, EDITABLE_READING_STATUSES))){ closeOverlay(); return; }
+    if (!(await freshHazards())) return;
+    if (leakNotPassed(j) && !jobHazards(j).length){ toast(LEAK_SKIP_BLOCKED, "bad"); closeOverlay(); renderMain(); return; }
     const lt = {status:"skipped", reason, at:now(), by:me()?.name||""};
     const patch = leakPatch(j, lt);
     if (!(await writeDoc("jobs/"+j.id, patch, true))) return;
@@ -2137,12 +2249,19 @@ function materialForm(j){
 
 /* ---- safety / red tag ---- */
 /* Re-read red tags before a status change, so a tag added or removed on another device is counted. */
-async function freshHazards(){
+/* After replacing S.hazards the screen is redrawn (cards must not point at old objects) — unless something is being typed,
+   then only the "New data loaded" hint is shown. opts.noRender: the caller redraws itself. opts.quiet: no error toast. */
+async function freshHazards(opts){
+  opts = opts||{};
   try{
     const snap = await db.collection("hazards").get();
     S.hazards = snap.docs.filter(d=>SAFE_ID.test(String(d.id))).map(d=>Object.assign({id:d.id}, d.data()));
-    return true;
-  }catch(e){ console.error(e); toast("Couldn't check the latest red tags. Try again.", "bad"); return false; }
+  }catch(e){ console.error(e); if (!opts.quiet) toast("Couldn't check the latest red tags. Try again.", "bad"); return false; }
+  if (!opts.noRender){
+    if (hasDraft($("#main"))){ renderSide(); renderTabbar(); showRefreshHint(); }
+    else render();
+  }
+  return true;
 }
 /* Re-read one red tag in place. null (with a toast) if it can't be read. */
 async function freshHazard(h){
@@ -2189,10 +2308,10 @@ function hazardCard(h, j){
       <div><div class="k">Tag attached</div><div class="v">${h.tagAffixed?"Yes":"No"}</div></div>
       <div><div class="k">Occupant notice given</div><div class="v">${h.userNoticeGiven?"Yes":"No"}</div></div>
       <div><div class="k">TSSA notified</div><div class="v">${h.tssaNotified?"Yes":"Not needed / no"}</div></div>
-      <div><div class="k">Written notice due</div><div class="v">${h.writtenNoticeSentAt?"Sent":due?(days<0?`<span style="color:var(--bad)">Overdue ${-days} day(s)</span>`:`${esc(fmtDateOnly(due))} (${days} day(s))`):"After the gas utility is told"}</div></div>
+      <div><div class="k">Written notice due</div><div class="v">${h.writtenNoticeSentAt?(h.writtenNoticeLate?`Sent <span class="pill bad">Sent late</span>`:"Sent"):badDate(due)?`<span style="color:var(--bad)">Date can't be read — treat as overdue</span>`:due?(days<0?`<span style="color:var(--bad)">Overdue ${-days} day(s)</span>`:`${esc(fmtDateOnly(due))} (${days} day(s))`):"After the gas utility is told"}</div></div>
     </div>
     <h4 class="mt" style="margin-bottom:6px">Steps</h4><div class="stack tight" data-steps></div>
-    ${resolved?`<div class="callout ok mt">${icon("check","sm")}<div><b>Removed${h.removedByType==="tssa_inspector"?" by a TSSA inspector":""}:</b> ${esc(h.resolvedBy||h.removerName||"")} · ${esc(fmtDateOnly(h.resolvedAt))}<div>Corrective action: ${esc(h.correctiveAction||h.resolution||"")}</div>${h.distributorClearNoticeAt?`<div class="hint">Removal notice sent to the gas distributor: ${esc(fmtDate(h.distributorClearNoticeAt))}</div>`:""}</div></div>`:""}
+    ${resolved?`<div class="callout ok mt">${icon("check","sm")}<div><b>Removed${h.removedByType==="tssa_inspector"?" by a TSSA inspector":""}:</b> ${esc(h.removedByType==="tssa_inspector" ? (h.removerName||String(h.resolvedBy||"").replace(/^TSSA inspector\s+/i,"")) : (h.resolvedBy||h.removerName||""))} · ${esc(fmtDateOnly(h.resolvedAt))}<div>Corrective action: ${esc(h.correctiveAction||h.resolution||"")}</div>${h.distributorClearNoticeAt?`<div class="hint">Removal notice sent to the gas distributor: ${esc(fmtDate(h.distributorClearNoticeAt))}</div>`:""}</div></div>`:""}
     <div class="actionbar mt"></div></div>`);
   const ab = $(".actionbar", c);
   const jobOpen = !j || !isClosed(j);
@@ -2205,9 +2324,9 @@ function hazardCard(h, j){
   };
   hazardSteps(h).forEach(st=>{
     const n = HZ_STEPS.indexOf(st)+1;
-    const info = h[st.k] ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}`
+    const info = h[st.k] ? `${esc(fmtDate(h[st.k]))}${h[st.by]?" · recorded by "+esc(h[st.by]):""}${st.k==="writtenNoticeSentAt" && h.writtenNoticeLate?` <span class="pill bad">Sent late</span>`:""}`
       : st.k==="gasShutOffAt" && h.gasShutOff ? "Ticked as shut off when reported, but no time recorded."
-      : st.k==="writtenNoticeSentAt" && due ? `Not sent yet — due by ${esc(fmtDateOnly(due))}` : "Not recorded";
+      : st.k==="writtenNoticeSentAt" && due ? `Not sent yet — due by ${esc(dueText(due))}` : "Not recorded";
     const row = el(`<div class="note row between wrap"><div><b>${n}. ${esc(st.label)}</b><div class="hint">${info}</div></div></div>`);
     /* The written notice can still be recorded after the job is closed or the tag removed. */
     const allowed = S.role!=="accountant" && !h[st.k] && (st.k==="writtenNoticeSentAt" || (!resolved && jobOpen));
@@ -2215,9 +2334,11 @@ function hazardCard(h, j){
     $("[data-steps]", c).appendChild(row);
   });
   if (!resolved && S.role!=="accountant" && jobOpen){
-    const r = el(`<button type="button" class="btn sm go">${icon("check","sm")} Remove red tag</button>`);
+    const blocked = immStepsMissing(h);
+    const r = el(`<button type="button" class="btn sm go" ${blocked?"disabled":""}>${icon("check","sm")} Remove red tag</button>`);
     r.addEventListener("click", ()=>clearForm(h, audit, tagName));
     ab.appendChild(r);
+    if (blocked) ab.appendChild(el(`<span class="hint">${esc(IMM_REMOVE_BLOCKED)}</span>`));
   }
   return c;
 }
@@ -2234,16 +2355,32 @@ function stepForm(h, st, audit, tagName){
     const p = {[st.k]:d.toISOString(), [st.by]:me()?.name||"", [st.rec]:now()};
     if (st.k==="gasShutOffAt") p.gasShutOff = true;
     if (st.k==="distributorNotifiedAt" && !isImmediate(h) && !h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
+    /* Written notice recorded after its due date (or the due date can't be read): saved as late. */
+    const due = st.k==="writtenNoticeSentAt" ? noticeDue(h) : null;
+    if (due && (badDate(due) || d.getTime() > ts(due))) p.writtenNoticeLate = true;
     if (!(await writeDoc("hazards/"+h.id, p, true))) return;
     Object.assign(h, p);
-    await audit(`Red tag step: ${st.label} — ${fmtDate(p[st.k])}`, `Red tag on ${tagName}: ${st.label.toLowerCase()} (recorded by ${p[st.by]||"unknown"}).`);
+    await audit(`Red tag step: ${st.label} — ${fmtDate(p[st.k])}${p.writtenNoticeLate?` · sent late (was due ${dueText(due)})`:""}`, `Red tag on ${tagName}: ${st.label.toLowerCase()} (recorded by ${p[st.by]||"unknown"}).`);
     closeOverlay(); toast("Recorded."); render();
   });
 }
+/* Immediate hazard: the tag can't be removed until steps 1–3 are recorded. */
+const immStepsMissing = h=> isImmediate(h) && !HZ_STEPS.slice(0,3).every(st=>!!h[st.k]);
+const IMM_REMOVE_BLOCKED = "Record gas shut off, customer informed and utility told first.";
+/* Input rating in BTU/h: the number field, or else the old text field (e.g. "500,000 BTU/h", "500000", "500 MBH" or "500 kBTU/h" = x1000). null if unknown. */
+function equipmentBtuh(e){
+  const n = Number(e?.inputBtuh); if (Number.isFinite(n) && n>0) return n;
+  const t = String(e?.input??"").replace(/,/g,"").trim(); if (!t) return null;
+  /* Only these forms are read; anything else counts as unknown (never guessed). */
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*(btu(?:\s*\/?\s*h(?:r|our)?)?|btuh|mbh|mbtu(?:\s*\/?\s*h(?:r|our)?)?|kbtu(?:\s*\/?\s*h(?:r|our)?)?)?$/i); if (!m) return null;
+  const v = Number(m[1]) * (/^(mbh|mbtu|kbtu)/i.test(m[2]||"") ? 1000 : 1);
+  return Number.isFinite(v) && v>0 ? v : null;
+}
 /* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h. */
 function clearRule(h){
-  const e = equipmentById(h.equipmentId); const btu = Number(e?.inputBtuh);
-  const known = Number.isFinite(btu) && btu>0;
+  /* No equipment on the tag: use the equipment of the job it was raised on. */
+  const e = equipmentById(h.equipmentId) || equipmentById(jobById(h.jobId)?.equipmentId); const btu = equipmentBtuh(e);
+  const known = btu!==null;
   const need = known && btu>400000 ? "G1" : "G2";
   const u = me(); let why = "";
   if (!u) why = "Choose who you are first.";
@@ -2252,6 +2389,7 @@ function clearRule(h){
   return {ok:!why, why, known};
 }
 function clearForm(h, audit, tagName){
+  if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); return; }
   const rule = clearRule(h); const u = me()||{};
   const b = el(`<form>${modalHead("Remove red tag", tagName)}
     <div class="field"><label>Corrective action — what was repaired *</label><textarea name="fixText"></textarea></div>
@@ -2285,6 +2423,7 @@ function clearForm(h, audit, tagName){
     const notice = stepTime(b.notice, h, "Removal notice sent to the gas distributor"); if (!notice) return;
     if (!(await freshHazard(h))) return;
     if (h.status==="resolved"){ toast("This red tag was already removed on another device.","bad"); closeOverlay(); render(); return; }
+    if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); closeOverlay(); render(); return; }
     const at = now();
     const p = {status:"resolved", removedByType:who==="me"?"technician":"tssa_inspector", removerName, removerAddress, removerTssaCert, removerUserId:who==="me"?(S.userId||null):null,
       correctiveAction:action, clearedAt:at, distributorClearNoticeAt:notice.toISOString(), clearRecordedBy:me()?.name||"", clearRecordedById:S.userId||null,
@@ -2298,7 +2437,7 @@ function clearForm(h, audit, tagName){
 function hazardForm(j){
   const b = el(`<form>${modalHead("Report unsafe condition", j.refNumber+" · "+(customerById(j.customerId)?.name||""))}
     <div class="grid g2">
-      <div class="field"><label>Equipment</label><select name="equipmentId"><option value="">Not linked</option>${S.equipment.filter(e=>e.siteCustomerId===j.customerId).map(e=>`<option value="${esc(e.id)}" ${j.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))}</option>`).join("")}</select></div>
+      <div class="field"><label>Equipment</label><select name="equipmentId">${j.equipmentId?"":`<option value="">Not linked</option>`}${S.equipment.filter(e=>e.siteCustomerId===j.customerId || e.id===j.equipmentId).map(e=>`<option value="${esc(e.id)}" ${j.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))}</option>`).join("")}</select></div>
       <div class="field"><label>Hazard level *</label><select name="level"><option value="immediate">Immediate hazard</option><option value="not_immediate">No immediate hazard</option></select></div>
       <div class="field" style="grid-column:1/-1"><label>What did you find? *</label><textarea name="description" required placeholder="Objective observations only."></textarea></div>
       <div class="field"><label>Code clause (CSA B149.1 / regulation)</label><input name="codeRef" placeholder="e.g. B149.1 clause …"></div>
@@ -2336,6 +2475,11 @@ function hazardForm(j){
     const id = uid("hz"); if (!(await writeDoc("hazards/"+id, rec))) return;
     S.hazards.push(Object.assign({id}, rec));
     await logEvent(j.id, "hazard", {note:(imm?"Immediate hazard: ":"Unsafe condition: ")+rec.description, hazardId:id});
+    /* Immediate hazard: an earlier "left in safe operating condition" tick on this job no longer holds. */
+    if (imm && (await freshJob(j)) && j.readings?.leftSafe){
+      const r = Object.assign({}, j.readings); delete r.leftSafe;
+      if (await writeDoc("jobs/"+j.id, {readings:r}, true)){ j.readings = r; await logEvent(j.id, "readings", {note:"“Left in safe operating condition” cleared — immediate hazard red tag"}); }
+    }
     await notify(`Red tag on ${j.refNumber}: ${rec.description}`, {toRole:"managers", jobId:j.id});
     closeOverlay(); toast(imm ? "Red tag saved. Now record each step with its time on the red tag." : "Red tag saved. It now shows on the equipment passport."); render();
   });
@@ -2348,16 +2492,17 @@ function completionItems(j){
   const hz = jobHazards(j), imm = hz.filter(isImmediate);
   items.push({label:"a work note", ok:s.notes.length>0, tab:"notes", hint:"What you found and what you did."});
   items.push({label:"at least one photo", ok:s.media.length>0, tab:"media", hint:"Before / after or the nameplate."});
-  if (S.config.modules.leakTest){
-    const k = leakResultKind(j.leakTest);
-    /* Fail / Inconclusive blocks closing unless the appliance is red-tagged. A later passing re-test replaces the result. */
+  /* Fail / Inconclusive blocks closing unless the appliance is red-tagged. Only a later completed (passing) re-test replaces
+     the result — Skip / "not recorded" do not. This safety block applies even when the leak test module is turned off. */
+  const k = leakResultKind(effectiveLeak(j));
+  if ((k && k!=="pass") || S.config.modules.leakTest){
     if (k && k!=="pass") items.push({label:`leak test result: ${k==="fail"?"FAIL":k==="inconclusive"?"inconclusive":"unknown"}${hz.length?" (appliance red-tagged)":""}`, ok:hz.length>0, bad:!hz.length, safety:true, tab:"leak", hint:"The leak test did not pass. Fix and re-test and record a Pass, or red-tag the appliance."});
     else items.push({label:"leak test recorded or skipped", ok:["completed","skipped"].includes(j.leakTest?.status), tab:"leak", hint:leakRelevant(j)?"Recommended for this job.":"Optional — record or skip."});
   }
   const def = readingDef(j); const req = def.checks.filter(c=>c[2]);
   req.forEach(([k,label])=>{
     if (k==="leftSafe" && imm.length) items.push({label:"appliance is red-tagged — gas shut off", ok:imm.every(h=>!!h.gasShutOffAt), bad:true, safety:true, tab:"safety", hint:"Record the time the gas was shut off on the red tag."});
-    else items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:!!(j.readings||{})[k], safety:k==="leftSafe", tab:"readings", hint:"Confirm it in Readings."});
+    else items.push({label:label.charAt(0).toLowerCase()+label.slice(1), ok:k==="leftSafe" ? leftSafeOk(j) : !!(j.readings||{})[k], safety:k==="leftSafe", tab:"readings", hint:k==="leftSafe" && (j.readings||{}).leftSafe ? "A red tag was removed after this was saved. Confirm it again in Readings." : "Confirm it in Readings."});
   });
   if (imm.length) items.push({label:"red tag steps 1–3 recorded (gas shut off, customer informed, gas utility told)", ok:imm.every(h=>HZ_STEPS.slice(0,3).every(st=>!!h[st.k])), bad:true, safety:true, tab:"safety", hint:"Record each step with its time on the red tag."});
   const other = hz.filter(h=>!isImmediate(h));
@@ -2944,7 +3089,7 @@ function renderLaunch(){
     ["Red tag records", "Confirm the record fields and retention match O. Reg. 212/01 and CSA B149.1, and how long work orders must be kept."],
     ["Refrigerant records", "Confirm what must be logged when refrigerant is added or recovered (Ontario refrigerant regulations) before relying on the app for it."],
     ["Photo and video retention", "Decide how long job photos are kept and who can delete them."],
-    ["Real sign-in, role permissions and company data separation", "Not built in this prototype. Today anyone with the link can switch roles."],
+    ["Real sign-in, role permissions and company data separation", "Not built in this prototype. Today anyone with the link can switch roles. “Viewing as” can pick any user, so the licence rules (G3/G2/G1) are not real security until a real login is added."],
     ["Server-side audit log", "The audit log must be written on the server so it can't be altered."],
   ];
   const wrap = el(`<div><div class="pagehead"><div><h1>Launch readiness</h1><div class="sub">This screen has no launch button on purpose.</div></div></div>
