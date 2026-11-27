@@ -294,6 +294,10 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
 .toast.bad{background:#7a1d12}
 #setup{position:fixed; inset:0; z-index:150; background:var(--bg); overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:24px 16px}
 #setup .setupcard{width:min(560px,100%); margin-top:6vh}
+/* The safety banner stays visible above the first-start / setup screen. */
+body:has(#setup) #banner{position:fixed; top:0; left:0; right:0; z-index:151}
+body:has(#setup) #setup{padding-top:calc(var(--banner-h,0px) + 24px)}
+.selfhint .short{display:none}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{opacity:0; transform:translateY(6px) scale(.98)}to{opacity:1; transform:none}}
 @keyframes slide{from{transform:translateX(30px); opacity:0}to{transform:none; opacity:1}}
@@ -324,10 +328,15 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
   /* Phone: the job action bar stays compact (buttons side by side) so it covers little of the page. */
   .mobile-sticky .btn.lg{flex:1 1 0; min-width:0; padding:8px 6px; font-size:13px; gap:5px; border-radius:10px; white-space:normal; line-height:1.15; text-align:center}
   .mobile-sticky > .hint, .mobile-sticky > .pill{flex:1 1 0; min-width:0; white-space:normal; font-size:11.5px; line-height:1.25}
+  /* Phone: the self-approval hint is one short line, so the bar stays low (full text in the title and on the Review page). */
+  .selfhint .long{display:none} .selfhint .short{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   #main:has(.mobile-sticky){padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
   html{scroll-padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
   /* A modal is open: toasts go to the top so they don't cover the form fields or its buttons. */
   body:has(#overlays .overlay) #toasts{top:calc(10px + env(safe-area-inset-top,0px)); bottom:auto}
+  /* ...and only the newest one shows there, with room kept above the form so it doesn't cover the first field. */
+  body:has(#overlays .overlay) #toasts .toast:not(:last-child){display:none}
+  .overlay .modal{max-height:calc(100vh - 110px - env(safe-area-inset-top,0px))}
 }
 @media (max-width:520px){ .g4{grid-template-columns:repeat(2,minmax(0,1fr))} .kpi .num{font-size:24px} h1{font-size:22px} .steps .lb{font-size:10px} }
 @media print{ #side,#top,#tabbar,.btn,.tabs{display:none!important} #main{padding:0} .card{box-shadow:none} }
@@ -515,11 +524,15 @@ function avatar(u, size){
 }
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function lsRemove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function toLocalInput(iso){ const d = iso?new Date(iso):new Date(); const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
 function mapsUrl(addr){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr||""); }
+/* At most 2 toasts show at once (the newest), so they never cover much of the page. Success toasts go away sooner. */
+const MAX_TOASTS = 2;
 function toast(msg, kind){
   const t = el(`<div class="toast ${kind||""}">${icon(kind==="bad"?"alert":"check","sm")}<span>${esc(msg)}</span></div>`);
-  $("#toasts").appendChild(t); setTimeout(()=>t.remove(), 4200);
+  const box = $("#toasts"); box.appendChild(t); setTimeout(()=>t.remove(), kind==="bad" ? 4200 : 2600);
+  while (box.children.length > MAX_TOASTS) box.firstElementChild.remove();
 }
 let downloadsApi;
 async function downloadFile(name, text){
@@ -654,10 +667,31 @@ async function boot(){
     if (!ok){ db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll(); }
     /* Live db: never write example data. Empty team (and every read worked) = first start. */
     else if (!S.loadErrors.length && !S.users.length){ showSetup(); return; }
+    /* This device's own setup owner was turned off as a duplicate: keep showing that, never log in as someone else. */
+    const blk = lsGet(SETUP_BLOCKED_KEY);
+    if (blk){
+      const bu = userById(blk);
+      if (bu && (bu.active===false || bu.setupDuplicateOf)){ showSetupBlocked(DUP_MSG); return; }
+      if (bu) lsRemove(SETUP_BLOCKED_KEY); /* the owner turned this account back on */
+    }
   } else {
     db = new MemDB(); mode = "preview"; await seedPreview(); await loadAll();
   }
   restoreUser();
+}
+const SETUP_BLOCKED_KEY = "sr_setup_blocked";
+const DUP_MSG = "Another device finished setup first. Ask that owner to add you.";
+/* Full-screen "setup not finished" message (with a Reload button). */
+function setupStopHtml(msg){
+  return `<div class="row">${brandMark(40)}<div><h2 id="setupH">Setup not finished on this device</h2></div></div>
+    <div class="callout bad mt" role="alert">${icon("alert","sm")}<div>${esc(msg)}</div></div>
+    <div class="mf"><button type="button" class="btn primary" data-reload>Reload</button></div>`;
+}
+function showSetupBlocked(msg){
+  renderBanner();
+  const wrap = el(`<div id="setup" role="dialog" aria-modal="true" aria-labelledby="setupH"><div class="card setupcard">${setupStopHtml(msg)}</div></div>`);
+  document.body.appendChild(wrap);
+  $("[data-reload]", wrap).addEventListener("click", ()=>location.reload());
 }
 
 async function loadAll(){
@@ -714,25 +748,24 @@ function showSetup(){
     /* Two devices may finish setup at the same moment. Re-read: the earliest setup owner (createdAt, then id) is kept,
        every later one is turned off. Each device applies the same rule, so they agree.
        If this device's owner was turned off (or can't be confirmed), stay on the setup screen — never log in as someone else. */
-    const stop = msg=>{
-      f.innerHTML = `<div class="row">${brandMark(40)}<div><h2 id="setupH">Setup not finished on this device</h2></div></div>
-        <div class="callout bad mt" role="alert">${icon("alert","sm")}<div>${esc(msg)}</div></div>
-        <div class="mf"><button type="button" class="btn primary" data-reload>Reload</button></div>`;
+    const stop = (msg, dup)=>{
+      /* Remember it, so a reload shows this again instead of logging in as the other owner. */
+      if (dup) lsSet(SETUP_BLOCKED_KEY, id);
+      f.innerHTML = setupStopHtml(msg);
       $("[data-reload]", f).addEventListener("click", ()=>location.reload());
     };
-    const DUP_MSG = "Another device finished setup first. Ask that owner to add you.";
     let warn = "";
     try{
       const all = (await db.collection("users").get()).docs.map(d=>Object.assign({id:d.id}, d.data()));
       const mine = all.find(x=>x.id===id);
       if (!mine){ stop("Your owner account couldn't be found after saving. Reload the page and check the team list before going on."); return; }
-      if (mine.active===false || mine.setupDuplicateOf){ stop(DUP_MSG); return; }
+      if (mine.active===false || mine.setupDuplicateOf){ stop(DUP_MSG, true); return; }
       const firsts = all.filter(x=>x.setupOwner && x.role==="owner" && x.active!==false)
         .sort((a,b)=> (ts(a.createdAt)||0)-(ts(b.createdAt)||0) || String(a.id).localeCompare(String(b.id)));
       if (firsts.length>1){
         const keep = firsts[0]; let failed = 0;
         for (const x of firsts.slice(1)) if (!(await writeDoc("users/"+x.id, {active:false, setupDuplicateOf:keep.id}, true, true))) failed++;
-        if (keep.id!==id){ stop(DUP_MSG+(failed?" Your extra owner account couldn't be turned off here — ask that owner to turn it off under Team.":"")); return; }
+        if (keep.id!==id){ stop(DUP_MSG+(failed?" Your extra owner account couldn't be turned off here — ask that owner to turn it off under Team.":""), true); return; }
         warn = failed
           ? "Another owner account was created at the same moment on another device, and it couldn't be turned off. Turn it off under Team."
           : "Another owner account was created at the same moment on another device. It was turned off; yours is kept.";
@@ -897,7 +930,9 @@ const HZ_STEPS = [
   {k:"writtenNoticeSentAt", by:"writtenNoticeSentBy", rec:"writtenNoticeSentRecordedAt", label:"Written notice sent to the gas utility"},
 ];
 /* A step (or notice) counts as recorded only if its value is a readable date string. A corrupt value counts as not recorded. */
-const stepOk = v=> typeof v==="string" && v!=="" && Number.isFinite(new Date(v).getTime());
+/* Must look like a date and time (e.g. "2026-03-01T14:30…"): "0", "1", "2020" or "12345" are not accepted. */
+const ISO_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const stepOk = v=> typeof v==="string" && ISO_DT.test(v) && Number.isFinite(new Date(v).getTime());
 const isImmediate = h=> h.hazardLevel==="immediate";
 const hazardSteps = h=> isImmediate(h) ? HZ_STEPS : HZ_STEPS.slice(2);
 const hazardAt = h=> h.createdAt || h.at;
@@ -983,12 +1018,24 @@ function setUser(userId, silent){
   if (!silent) toast(`Now viewing as ${u.name} (${ROLE_LABELS[u.role]}).`);
   return true;
 }
+/* Never switch silently to a different person: if the saved person is turned off or missing (or, with real data, no one
+   was saved on this device), show the person picker with a message. Preview with example data may start as a technician. */
 function restoreUser(){
-  const list = pickableUsers();
-  const savedRole = lsGet("sr_role"); /* older versions stored only the role */
-  const u = list.find(x=>x.id===lsGet("sr_user")) || list.find(x=>x.role===savedRole) || list.find(x=>x.role==="technician") || list[0];
+  const list = pickableUsers(), saved = lsGet("sr_user");
+  S.ui.pickMsg = "";
+  const u = saved ? list.find(x=>x.id===saved)
+    : mode==="preview" ? (list.find(x=>x.role===lsGet("sr_role")) || list.find(x=>x.role==="technician") || list[0]) : null;
   if (u && setUser(u.id, true)) return;
+  if (list.length) S.ui.pickMsg = saved ? "Your account is turned off. Pick who is using this device." : "Pick who is using this device.";
   S.userId = null; S.role = "technician"; render();
+}
+/* Shown instead of the page while no person is chosen. */
+function pickPersonCard(){
+  const c = el(`<div class="card"><div class="card-h"><h3>Who is using this device?</h3></div>
+    <div class="callout warn" style="margin-bottom:12px">${icon("user","sm")}<div>${esc(S.ui.pickMsg||"Pick who is using this device.")}</div></div>
+    <div class="field"><label for="pickSel">Person</label><select id="pickSel">${userOptions(false)}</select></div></div>`);
+  $("#pickSel", c).addEventListener("change", e=>setUser(e.target.value));
+  return c;
 }
 function go(tab){ S.view = {tab, jobId:null, jobTab:"overview", equipmentId:null, customerId:null}; closeOverlay(); render(); window.scrollTo(0,0); }
 function openJob(id, tab){
@@ -1132,7 +1179,8 @@ function renderMain(){
   const main = $("#main"); main.innerHTML = "";
   let node;
   try{
-    if (S.view.jobId) node = renderJob(S.view.jobId);
+    if (!me() && pickableUsers().length) node = pickPersonCard();
+    else if (S.view.jobId) node = renderJob(S.view.jobId);
     else {
       const map = { dashboard:renderDashboard, schedule:renderDispatch, review:renderReview, help:renderHelp, customers:renderCustomers,
         equipment:renderEquipment, archive:renderArchive, reports:renderReports, users:renderTeam, settings:renderSettings,
@@ -1642,7 +1690,7 @@ function renderJob(id){
   }
   if (can.approve(j)){
     const r = el(`<button class="btn danger lg">${icon("undo")} Send back</button>`); r.addEventListener("click", ()=>sendBackJob(j));
-    if (cantSelfApprove(j)) bar.append(el(`<span class="hint">${esc(SELF_APPROVE_MSG)}</span>`), r);
+    if (cantSelfApprove(j)) bar.append(el(`<span class="hint selfhint" title="${esc(SELF_APPROVE_MSG)}"><span class="long">${esc(SELF_APPROVE_MSG)}</span><span class="short">${esc(SELF_APPROVE_SHORT)}</span></span>`), r);
     else { const a = el(`<button class="btn go lg">${icon("check")} Approve &amp; close</button>`); a.addEventListener("click", withBusy(a, ()=>approveJob(j))); bar.append(a, r); }
   }
   if (!closed && j.status==="completion_review" && !can.approve(j)) bar.appendChild(el(`<span class="pill info">Waiting for a supervisor to review</span>`));
@@ -1754,6 +1802,7 @@ function workedOnJob(j, userId){
   return (s.events||[]).some(e=>e.byId===userId && (FIELD_EVENTS.has(e.type) || (e.type==="status" && e.status==="completion_review")));
 }
 const SELF_APPROVE_MSG = "Only a G2 or G1 can approve a job they worked on. Another supervisor (G2 or higher) must approve.";
+const SELF_APPROVE_SHORT = "You worked on this job — another G2+ must approve";
 /* The person viewing worked on this job and isn't G2/G1: the Approve button is not shown (approveJob still checks). */
 const cantSelfApprove = j=>{ const u = me(); return !!u && workedOnJob(j, u.id) && !hasLic(u, "G2"); };
 async function approveJob(j){
@@ -1841,9 +1890,12 @@ function techWarnings(techId, whenIso, trade, excludeId){
 }
 function openJobForm(j){
   const editing = !!j;
-  /* While in review the technician and equipment are fixed; equipment with an open red tag stays linked. */
+  /* While in review the technician and equipment are fixed. While the job (or its equipment) has an open red tag,
+     the customer, equipment and site address stay as they are. The site address is locked whenever those are. */
   const inReview = editing && j.status==="completion_review";
-  const eqLocked = inReview || (editing && !!j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length>0);
+  const tagLock = j=> openHazards(h=>h.jobId===j.id || (!!j.equipmentId && h.equipmentId===j.equipmentId)).length>0;
+  const eqLocked = inReview || (editing && tagLock(j));
+  const lockWhy = inReview ? "Locked while waiting for review." : "Locked: this job or its equipment has an open red tag.";
   const custOpts = S.customers.slice().sort((a,b)=>String(a.name).localeCompare(b.name)).map(c=>`<option value="${esc(c.id)}" ${j?.customerId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
   const curTech = j?.technicianId && !fieldUsers().some(u=>u.id===j.technicianId) ? userById(j.technicianId) : null;
   /* A technician or equipment id that isn't loaded keeps a placeholder, so an unrelated edit doesn't unassign / unlink it. */
@@ -1851,17 +1903,17 @@ function openJobForm(j){
   const techOpts = `<option value="">Unassigned</option>`+(curTech?`<option value="${esc(curTech.id)}" selected>${esc(userLabel(curTech))}</option>`:j?.technicianId && !userById(j.technicianId)?unknownOpt(j.technicianId):"")+fieldUsers().map(u=>`<option value="${esc(u.id)}" ${j?.technicianId===u.id?"selected":""}>${esc(userLabel(u))}</option>`).join("");
   const b = el(`<form>${modalHead(editing?"Edit "+j.refNumber:"New job", editing?"Changes are recorded in the job timeline.":"Fields marked * are required.")}
     <div class="grid g2">
-      <div class="field"><label>Customer *</label><select name="customerId" required ${eqLocked?"disabled":""}><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select>${eqLocked?`<div class="hint">${inReview?"Locked while waiting for review.":"Locked: this job's equipment has an open red tag."}</div>`:""}</div>
+      <div class="field"><label>Customer *</label><select name="customerId" required ${eqLocked?"disabled":""}><option value="">Choose…</option>${custOpts}<option value="__new">+ New customer</option></select>${eqLocked?`<div class="hint">${esc(lockWhy)}</div>`:""}</div>
       <div class="field"><label>Reference #</label><input name="refNumber" value="${esc(j?.refNumber||nextRef())}" ${editing?"readonly":""}></div>
       <div class="field newc" hidden><label>New customer name *</label><input name="newName"></div>
       <div class="field newc" hidden><label>Phone</label><input name="newPhone" type="tel"></div>
-      <div class="field" style="grid-column:1/-1"><label>Service address *</label><input name="siteAddress" required value="${esc(j?.siteAddress||"")}" placeholder="Street, city, province"></div>
+      <div class="field" style="grid-column:1/-1"><label>Service address *</label><input name="siteAddress" required value="${esc(j?.siteAddress||"")}" placeholder="Street, city, province" ${eqLocked?"readonly":""}>${eqLocked?`<div class="hint">${esc(lockWhy)}</div>`:""}</div>
       <div class="field"><label>Date &amp; time *</label><input type="datetime-local" name="scheduledAt" required value="${esc(toLocalInput(j?.scheduledAt))}"></div>
       <div class="field"><label>Technician</label><select name="technicianId" ${inReview?"disabled":""}>${techOpts}</select>${inReview?`<div class="hint">Locked while waiting for review.</div>`:""}</div>
       <div class="field"><label>Trade *</label><select name="requiredTrade">${Object.entries(THEMES).map(([k,v])=>`<option value="${k}" ${(j?.requiredTrade||S.config.activeTheme)===k?"selected":""}>${esc(v.label)}</option>`).join("")}</select></div>
       <div class="field"><label>Job type *</label><select name="jobType">${JOB_TYPES.map(t=>`<option value="${t}" ${j?.jobType===t?"selected":""}>${cap(t)}</option>`).join("")}</select></div>
       <div class="field"><label>Priority *</label><select name="priority">${PRIORITIES.map(p=>`<option value="${p}" ${(j?.priority||"normal")===p?"selected":""}>${cap(p)}</option>`).join("")}</select></div>
-      <div class="field"><label>Equipment</label><select name="equipmentId" ${eqLocked?"disabled":""}></select>${eqLocked?`<div class="hint">${inReview?"Locked while waiting for review.":"Locked: this equipment has an open red tag."}</div>`:""}</div>
+      <div class="field"><label>Equipment</label><select name="equipmentId" ${eqLocked?"disabled":""}></select>${eqLocked?`<div class="hint">${esc(lockWhy)}</div>`:""}</div>
     </div>
     ${editing?"":`<div class="field mt"><label>Notes for the technician</label><textarea name="notes" placeholder="Gate code, parking, what the customer reported…"></textarea></div>`}
     <div id="warn" class="stack tight mt"></div>
@@ -1870,7 +1922,8 @@ function openJobForm(j){
   const f = b;
   function fillEquip(){
     const cid = f.customerId.value; const list = S.equipment.filter(e=>!cid || e.siteCustomerId===cid || e.id===j?.equipmentId);
-    f.equipmentId.innerHTML = `<option value="">None</option>`+(j?.equipmentId && !equipmentById(j.equipmentId)?unknownOpt(j.equipmentId):"")+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
+    /* The placeholder for an equipment id that isn't loaded only belongs to the job's own customer. */
+    f.equipmentId.innerHTML = `<option value="">None</option>`+(j?.equipmentId && !equipmentById(j.equipmentId) && cid===j.customerId?unknownOpt(j.equipmentId):"")+list.map(e=>`<option value="${esc(e.id)}" ${j?.equipmentId===e.id?"selected":""}>${esc(equipmentLabel(e))} · ${esc(e.serial||"")}</option>`).join("");
   }
   function warn(){
     const w = techWarnings(f.technicianId.value, f.scheduledAt.value?new Date(f.scheduledAt.value).toISOString():now(), f.requiredTrade.value, j?.id);
@@ -1907,11 +1960,11 @@ function openJobForm(j){
       if (!(await freshJob(j, OPEN_STATUSES))){ closeOverlay(); return; }
       const changed = k=> String(j[k]??"")!==String(data[k]??"");
       if (j.status==="completion_review" && changed("technicianId")){ toast("The technician can't be changed while the job is waiting for review. Send it back first.","bad"); return; }
-      if (changed("equipmentId") || changed("customerId")){
-        const what = changed("equipmentId") ? "equipment" : "customer";
+      if (changed("equipmentId") || changed("customerId") || changed("siteAddress")){
+        const what = changed("equipmentId") ? "equipment" : changed("customerId") ? "customer" : "site address";
         if (j.status==="completion_review"){ toast(`The ${what} can't be changed while the job is waiting for review. Send it back first.`,"bad"); return; }
         if (!(await freshHazards({noRender:true}))) return;
-        if (j.equipmentId && openHazards(h=>h.equipmentId===j.equipmentId).length){ toast(what==="equipment" ? "This equipment has an open red tag. It can't be unlinked or swapped until the red tag is removed." : "This job's equipment has an open red tag. The customer can't be changed until the red tag is removed.","bad"); return; }
+        if (tagLock(j)){ toast(`This job or its equipment has an open red tag. The ${what} can't be changed until the red tag is removed.`,"bad"); return; }
       }
       const prevTech = j.technicianId;
       if (!(await writeDoc("jobs/"+j.id, data, true))) return;
@@ -1982,10 +2035,13 @@ function jobReadings(j, s){
   /* While an open immediate-hazard red tag is on this job/equipment, "left in safe operating condition" can't be ticked. */
   const imm = jobHazards(j).filter(isImmediate);
   const tagged = k=> k==="leftSafe" && imm.length>0;
+  /* The removed-tag state this form was drawn with. A "left safe" tick only saves if it is still the same at save time. */
+  let drawnRm = removalState(j);
+  const sameRm = (a, b)=> (a.value??null)===(b.value??null) && a.ids===b.ids;
   const checkRow = ([k,label,req])=> tagged(k)
     ? `<div class="check" style="align-items:center"><span class="pill bad">${icon("tag","sm")} Appliance is red-tagged — gas shut off</span>${imm.every(h=>stepOk(h.gasShutOffAt))?"":`<span class="hint">Record the gas shut-off time on the red tag (Safety tab).</span>`}</div>`
     : k==="leftSafe" && r.leftSafe && !leftSafeOk(j)
-    ? `<label class="check"><input type="checkbox" name="${k}" ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}<div class="hint">A red tag was removed after this was last saved. Tick it again to confirm.</div></span></label>`
+    ? `<label class="check"><input type="checkbox" name="${k}" ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}<div class="hint">Something about this appliance's red tags changed since “left safe” was last saved. Tick it again to confirm.</div></span></label>`
     : `<label class="check"><input type="checkbox" name="${k}" ${r[k]?"checked":""} ${editable?"":"disabled"}><span>${esc(label)}${req?` <span class="pill nodot warn">Required to close</span>`:""}</span></label>`;
   const form = el(`<form class="card"><div class="card-h"><div><h3>${esc(THEMES[j.requiredTrade]?.label||"")} readings</h3><div class="hint">Type what your instruments show. Leave blank what you didn't measure — nothing is filled in for you.</div></div></div>
     ${inReview && !isClosed(j)?`<div class="callout mt" style="margin-bottom:12px">${icon("lock","sm")}<div>Readings are locked while the job is in review. A supervisor can send it back if something needs changing.</div></div>`:""}
@@ -2010,18 +2066,23 @@ function jobReadings(j, s){
     if (bad.length){ toast(`“${bad[0][1]}” must be a plain number${NEG_OK_READINGS.has(bad[0][0])?"":" (0 or more)"}, e.g. 3.5.`,"bad"); return; }
     if (!(await freshJob(j, EDITABLE_READING_STATUSES))) return;
     if (!(await freshHazards({noRender:true}))) return;
-    /* A "left safe" tick that was already shown ticked (not ticked again now) only stands if it is still valid after the re-read. */
-    if (out.leftSafe && form.leftSafe && form.leftSafe.defaultChecked && !(j.readings?.leftSafe && leftSafeOk(j))){
-      toast("Something changed — tick “left safe” again.","bad"); renderMain(); return;
+    /* A red tag was removed (here or on another device) since the form was drawn: the tick must be given again.
+       Untick only that box — the typed readings stay in the form. */
+    const nowRm = removalState(j);
+    if (out.leftSafe && !sameRm(drawnRm, nowRm)){
+      drawnRm = nowRm; if (form.leftSafe) form.leftSafe.checked = false;
+      toast("Something changed — tick “left safe” again.","bad"); return;
     }
-    if (jobHazards(j).some(isImmediate)) delete out.leftSafe;
+    const droppedSafe = !!out.leftSafe && jobHazards(j).some(isImmediate);
+    if (droppedSafe) delete out.leftSafe;
     if (out.leftSafe){ const rm = removalState(j); out.leftSafeAfterClear = rm.value; out.leftSafeRemovedIds = rm.ids; }
     if (j.requiredTrade==="hvac" && Number(out.coAirFree)>=400) toast("Flue CO is very high. Check the appliance and consider a red tag before leaving.","bad");
     out.savedBy = me()?.name||""; out.savedAt = now();
     if (!(await writeDoc("jobs/"+j.id, {readings:out}, true))) return;
     j.readings = out;
     await logEvent(j.id, "readings", {note:isEmpty ? "Readings cleared" : `${Object.keys(out).filter(k=>!READING_META.has(k)).length} reading(s)/check(s) saved`});
-    toast("Readings saved."); renderMain();
+    if (droppedSafe) toast("Readings saved. “Left safe” was not saved: the appliance is now red-tagged.","bad");
+    else toast("Readings saved."); renderMain();
   });
   wrap.appendChild(form);
   return wrap;
@@ -2423,6 +2484,9 @@ function stepForm(h, st, audit, tagName){
     if (!(await freshHazard(h))) return;
     if (stepOk(h[st.k])){ toast("This step was already recorded on another device.","bad"); closeOverlay(); render(); return; }
     const p = {[st.k]:d.toISOString(), [st.by]:me()?.name||"", [st.rec]:now()};
+    /* Re-recording over an unreadable value: keep the old raw value next to it, so nothing is lost from the record. */
+    const old = h[st.k], replaced = old!==undefined && old!==null && old!=="";
+    if (replaced){ let raw; try{ raw = typeof old==="string" ? old : JSON.stringify(old); }catch(e){ raw = String(old); } p[st.k+"Replaced"] = String(raw); }
     if (st.k==="gasShutOffAt") p.gasShutOff = true;
     if (st.k==="distributorNotifiedAt" && !isImmediate(h) && !h.writtenNoticeDue) p.writtenNoticeDue = new Date(d.getTime()+14*DAY).toISOString();
     /* Written notice recorded after its due date (or the due date can't be read): saved as late. */
@@ -2430,7 +2494,8 @@ function stepForm(h, st, audit, tagName){
     if (due && (badDate(due) || d.getTime() > ts(due))) p.writtenNoticeLate = true;
     if (!(await writeDoc("hazards/"+h.id, p, true))) return;
     Object.assign(h, p);
-    await audit(`Red tag step: ${st.label} — ${fmtDate(p[st.k])}${p.writtenNoticeLate?` · sent late (was due ${dueText(due)})`:""}`, `Red tag on ${tagName}: ${st.label.toLowerCase()} (recorded by ${p[st.by]||"unknown"}).`);
+    const rtxt = replaced ? ` · replaced an unreadable value (“${p[st.k+"Replaced"].slice(0,60)}”)` : "";
+    await audit(`Red tag step: ${st.label} — ${fmtDate(p[st.k])}${p.writtenNoticeLate?` · sent late (was due ${dueText(due)})`:""}${rtxt}`, `Red tag on ${tagName}: ${st.label.toLowerCase()} (recorded by ${p[st.by]||"unknown"})${replaced?" — replaced an unreadable value":""}.`);
     closeOverlay(); toast("Recorded."); render();
   });
 }
@@ -2441,7 +2506,9 @@ const IMM_REMOVE_BLOCKED = "Record gas shut off, customer informed and utility t
    Text forms read: whole numbers with optional "," or " " thousands separators ("500,000", "500 000", "500000"),
    with an optional unit: BTU/h (x1), MBH / MBtu/h / kBTU/h / "500K BTU/h" (x1000), MMBtu/h (x1,000,000).
    Anything with a dot (e.g. "500.000" — 500 or 500,000?) or any other form is unknown.
-   A value under 1,000 BTU/h is not a real gas appliance rating (almost certainly a unit mistake) — unknown. */
+   A value under 1,000 BTU/h is not a real gas appliance rating (almost certainly a unit mistake) — unknown.
+   Plausibility: a value in MBH / MBtu/h / kBTU/h that comes to under 10,000 BTU/h (e.g. "5 MBH") is most likely a unit mistake — unknown.
+   A whole number too long to store exactly but clearly over 400,000 is treated as known and over 400,000 (G1), not unknown. */
 const BTU_MIN = 1000;
 const BTU_NUM = /^(\d{1,3}(?:,\d{3})+|\d{1,3}(?: \d{3})+|\d+)$/;
 function btuhRecorded(e){ return !!e && ((e.inputBtuh!==undefined && e.inputBtuh!==null && String(e.inputBtuh).trim()!=="") || String(e.input??"").trim()!==""); }
@@ -2449,7 +2516,9 @@ function equipmentBtuh(e){
   if (!e) return null;
   if (e.inputBtuh!==undefined && e.inputBtuh!==null && String(e.inputBtuh).trim()!==""){
     /* A stored number field that isn't a whole number of at least 1,000 is unreadable — the old text is not used instead. */
-    const n = typeof e.inputBtuh==="number" ? e.inputBtuh : (BTU_NUM.test(String(e.inputBtuh).trim()) ? Number(String(e.inputBtuh).replace(/[, ]/g,"")) : NaN);
+    const isText = typeof e.inputBtuh!=="number";
+    const n = !isText ? e.inputBtuh : (BTU_NUM.test(String(e.inputBtuh).trim()) ? Number(String(e.inputBtuh).replace(/[, ]/g,"")) : NaN);
+    if (isText && !Number.isSafeInteger(n) && n>400000) return n;
     return Number.isInteger(n) && n>=BTU_MIN ? n : null;
   }
   const t = String(e.input??"").trim(); if (!t) return null;
@@ -2458,13 +2527,42 @@ function equipmentBtuh(e){
   const unit = (m[2]||m[3]||"").toLowerCase().replace(/\s+/g,"");
   const mult = /^mm/.test(unit) ? 1000000 : /^(mbh|mbtu|kbtu)$/.test(unit) ? 1000 : 1;
   const v = Number(m[1].replace(/[, ]/g,"")) * mult;
-  return Number.isSafeInteger(v) && v>=BTU_MIN ? v : null;
+  if (mult===1000 && v<10000) return null;
+  if (!Number.isSafeInteger(v)) return v>400000 ? v : null;
+  return v>=BTU_MIN ? v : null;
 }
+/* The rating as stored (number field, or else the old text field), for messages. */
+function rawRating(e){ return !e ? "" : (e.inputBtuh!==undefined && e.inputBtuh!==null && String(e.inputBtuh).trim()!=="") ? String(e.inputBtuh) : String(e.input??"").trim(); }
+function btuText(n){ return Number.isSafeInteger(n) ? n.toLocaleString()+" BTU/h" : "over 400,000 BTU/h (number too large to read exactly — check the rating plate)"; }
+function ratingText(e){ const n = equipmentBtuh(e); return n!==null ? btuText(n) : btuhRecorded(e) ? `“${rawRating(e)}” (can't be read)` : "not recorded"; }
+/* The equipment whose rating decides who may remove this red tag (same choice as clearRule). */
+const ruleEquipmentId = h=> h.equipmentId || jobById(h.jobId)?.equipmentId || null;
+/* Re-read one equipment record in place, so a rating changed on another device is seen. false (with a toast) if it can't be read.
+   A record that no longer exists is dropped from the list (its rating then counts as unknown). */
+async function freshEquipment(id, quietMissing){
+  if (!id) return true;
+  let snap;
+  try{ snap = await db.doc("equipment/"+id).get(); }
+  catch(e){ console.error(e); toast("Couldn't check the latest equipment record. Try again.","bad"); return false; }
+  const cur = equipmentById(id);
+  if (!snap || !snap.exists){ S.equipment = S.equipment.filter(x=>x.id!==id); if (!quietMissing) toast("This equipment record no longer exists.","bad"); return quietMissing ? true : false; }
+  const data = snap.data() || {};
+  if (cur){ Object.keys(cur).forEach(k=>{ if (k!=="id") delete cur[k]; }); Object.assign(cur, data); }
+  else S.equipment.push(Object.assign({id}, data));
+  return true;
+}
+/* Rating changes recorded on the equipment after this red tag was put on (all of them if the tag's date can't be read). */
+function ratingChangesSince(h){
+  const e = equipmentById(ruleEquipmentId(h)); const list = Array.isArray(e?.ratingChanges) ? e.ratingChanges.filter(c=>c && typeof c==="object") : [];
+  const t0 = ts(hazardAt(h));
+  return list.filter(c=> !Number.isFinite(t0) || !Number.isFinite(ts(c.at)) || ts(c.at) >= t0);
+}
+const ratingChangeLine = c=> `Rating changed after red tag: ${c.from||"?"} → ${c.to||"?"} by ${c.by||"unknown"} (${fmtDate(c.at)})`;
 /* Who may remove a red tag themselves: G2 or G1; only G1 if the input rating is over 400,000 BTU/h.
    known=false: the rating can't be used (unknownWhy says why). */
 function clearRule(h){
   /* Use the job's equipment only when the tag has no equipment of its own. A tag whose equipment isn't loaded has an unknown rating. */
-  const e = h.equipmentId ? equipmentById(h.equipmentId) : equipmentById(jobById(h.jobId)?.equipmentId);
+  const e = equipmentById(ruleEquipmentId(h));
   const btu = equipmentBtuh(e);
   const known = btu!==null;
   const unknownWhy = known ? "" : (h.equipmentId && !e) ? "The equipment on this red tag couldn't be found, so its input rating (BTU/h) can't be checked — check the rating plate."
@@ -2477,14 +2575,19 @@ function clearRule(h){
   else if (!hasLic(u, need)) why = need==="G1" ? "This appliance is over 400,000 BTU/h. Only a G1 can remove this red tag." : "Only a G2 or G1 gas technician can remove a red tag.";
   return {ok:!why, why, known, unknownWhy};
 }
-function clearForm(h, audit, tagName){
+async function clearForm(h, audit, tagName){
   if (immStepsMissing(h)){ toast(IMM_REMOVE_BLOCKED,"bad"); return; }
+  /* Re-read the equipment first: its rating decides who may remove the tag. */
+  if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
   const rule = clearRule(h); const u = me()||{};
+  const rcHtml = ()=>{ const rc = ratingChangesSince(h); return rc.length ? `<div class="callout bad mt">${icon("alert","sm")}<div>${rc.map(c=>`<div><b>${esc(ratingChangeLine(c))}</b></div>`).join("")}<div class="hint">Check the rating plate before removing this red tag.</div></div></div>` : ""; };
+  let rcSeen = ratingChangesSince(h).length;
   const b = el(`<form>${modalHead("Remove red tag", tagName)}
     <div class="field"><label>Corrective action — what was repaired *</label><textarea name="fixText"></textarea></div>
     <div class="field mt"><label>Removed by *</label>
       <label class="check"><input type="radio" name="who" value="me" ${rule.ok?"checked":"disabled"}><span>Me${rule.ok?"":`<div class="hint">${esc(rule.why)}</div>`}</span></label>
       <label class="check"><input type="radio" name="who" value="inspector" ${rule.ok?"":"checked"}><span>A TSSA inspector</span></label></div>
+    <div data-rc>${rcHtml()}</div>
     ${rule.known?"":`<div class="callout warn mt">${icon("alert","sm")}<div>${esc(rule.unknownWhy)} Until then a G2 or G1 is needed; if the appliance is over 400,000 BTU/h, only a G1 may remove this red tag.</div></div>`}
     <div class="grid g2 mt" data-me ${rule.ok?"":"hidden"}>
       <div class="field"><label>Your name *</label><input name="rname" value="${esc(u.name||"")}"></div>
@@ -2502,6 +2605,10 @@ function clearForm(h, audit, tagName){
     const who = b.who.value;
     if (who!=="me" && who!=="inspector"){ toast("Choose who removed the red tag.","bad"); return; }
     let removerName, removerAddress = "", removerTssaCert = "";
+    /* Re-read the equipment again: the rating may have been changed on another device while this form was open. */
+    if (!(await freshEquipment(ruleEquipmentId(h), true))) return;
+    const rcNow = ratingChangesSince(h).length;
+    if (rcNow!==rcSeen){ rcSeen = rcNow; $("[data-rc]", b).innerHTML = rcHtml(); toast("The input rating was just changed on another device. Check it, then press Remove again.","bad"); return; }
     if (who==="me"){
       const r = clearRule(h); if (!r.ok){ toast(r.why,"bad"); return; }
       removerName = b.rname.value.trim(); removerAddress = b.raddr.value.trim(); removerTssaCert = b.rcert.value.trim();
@@ -2613,7 +2720,7 @@ function jobChecklist(j){
 
 /* ---- timeline ---- */
 function timelineItem(f){
-  const map = {status:["chev","info"], created:["plus","info"], edited:["pencil","slate"], sent_back:["undo","bad"], readings:["gauge","violet"], leak:["droplet","info"], hazard:["tag","bad"], note:["pencil","slate"], media:["image","violet"], material:["receipt","warn"], help:["lifebuoy","warn"], answer:["lifebuoy","ok"], reading:["gauge","violet"]};
+  const map = {status:["chev","info"], created:["plus","info"], edited:["pencil","slate"], sent_back:["undo","bad"], readings:["gauge","violet"], leak:["droplet","info"], hazard:["tag","bad"], note:["pencil","slate"], media:["image","violet"], material:["receipt","warn"], help:["lifebuoy","warn"], answer:["lifebuoy","ok"], reading:["gauge","violet"], equipment:["box","warn"]};
   let kind = f.kind==="event" ? (f.type || (f.status?"status":"edited")) : f.kind;
   let text = f.text || "";
   if (f.kind==="event"){
@@ -2659,19 +2766,24 @@ function openHelpForm(j){
 /* ------------------------------ EQUIPMENT ------------------------------ */
 function equipmentAge(e){
   if (!e?.installDate) return "Install date unknown";
+  if (badDate(e.installDate)) return "Age unknown (install date can't be read)";
   const y = (Date.now()-ts(e.installDate))/(365.25*DAY);
   return y<1 ? "Installed less than a year ago" : `${Math.floor(y)} year${Math.floor(y)>1?"s":""} old · installed ${fmtDateOnly(e.installDate)}`;
 }
+/* When a closed job was done: closedAt, or else scheduledAt — only a readable date (null if neither can be read). */
+function doneAt(j){ return [j.closedAt, j.scheduledAt].find(d=>d && Number.isFinite(ts(d))) || null; }
 function lastService(e){
-  const done = S.jobs.filter(j=>j.equipmentId===e.id && isClosed(j)).sort((a,b)=>ts(b.closedAt||b.scheduledAt)-ts(a.closedAt||a.scheduledAt));
+  const done = S.jobs.filter(j=>j.equipmentId===e.id && isClosed(j) && doneAt(j)).sort((a,b)=>ts(doneAt(b))-ts(doneAt(a)));
   return done[0]||null;
 }
 const MAINT_TYPES = /furnace|boiler|heat pump|air cond|a\/c|\bac\b|water heater|hrv|erv|fireplace|rooftop|unit heater/i;
 function maintenanceDue(e){
   if (!MAINT_TYPES.test(e.type||"") && !/gas|propane|oil/i.test(e.fuel||"")) return null;
-  const last = S.jobs.filter(j=>j.equipmentId===e.id && isClosed(j) && ["maintenance","inspection","installation"].includes(j.jobType)).sort((a,b)=>ts(b.closedAt||b.scheduledAt)-ts(a.closedAt||a.scheduledAt))[0];
-  const base = last ? (last.closedAt||last.scheduledAt) : e.installDate;
-  if (!base) return null;
+  /* Dates that can't be read are skipped; if no date can be read at all, the due date is "can't be read" (never thrown). */
+  const all = S.jobs.filter(j=>j.equipmentId===e.id && isClosed(j) && ["maintenance","inspection","installation"].includes(j.jobType));
+  const last = all.filter(doneAt).sort((a,b)=>ts(doneAt(b))-ts(doneAt(a)))[0];
+  const base = last ? doneAt(last) : (e.installDate && !badDate(e.installDate) ? e.installDate : null);
+  if (!base) return (all.length || e.installDate) ? {due:null, overdue:false, unreadable:true, basis:all.length?"last maintenance":"install date"} : null;
   const due = ts(base)+365*DAY;
   return {due:new Date(due).toISOString(), overdue:due<Date.now(), basis:last?"last maintenance":"install date"};
 }
@@ -2691,7 +2803,7 @@ function renderEquipment(){
     list.forEach(e=>{
       const md = maintenanceDue(e); const hz = openHazards(h=>h.equipmentId===e.id).length;
       const tags = [hz?`<span class="pill bad">Red tag</span>`:"", md?.overdue?`<span class="pill warn">Maintenance due</span>`:"", e.qrStatus==="active"?`<span class="pill ok">QR active</span>`:""].join(" ") || `<span class="faint small">—</span>`;
-      const tr = el(`<tr class="click"><td><b>${esc(e.manufacturer)} ${esc(e.model)}</b><div class="tiny faint">${esc(e.type||"")}${e.fuel?" · "+esc(e.fuel):""}</div></td><td class="mono">${esc(e.serial||"—")}</td><td>${esc(customerById(e.siteCustomerId)?.name||"—")}</td><td>${esc(e.installDate?Math.floor((Date.now()-ts(e.installDate))/(365.25*DAY))+" yr":"—")}</td><td>${tags}</td></tr>`);
+      const tr = el(`<tr class="click"><td><b>${esc(e.manufacturer)} ${esc(e.model)}</b><div class="tiny faint">${esc(e.type||"")}${e.fuel?" · "+esc(e.fuel):""}</div></td><td class="mono">${esc(e.serial||"—")}</td><td>${esc(customerById(e.siteCustomerId)?.name||"—")}</td><td>${esc(!e.installDate?"—":badDate(e.installDate)?"age unknown":Math.floor((Date.now()-ts(e.installDate))/(365.25*DAY))+" yr")}</td><td>${tags}</td></tr>`);
       tr.addEventListener("click", ()=>openEquipment(e.id)); $("tbody", t).appendChild(tr);
     });
     box.appendChild(t);
@@ -2725,10 +2837,11 @@ function equipmentForm(e, presetCustomer){
     /* Whole number only ("60000", "60,000" or "60 000"). A dot is refused: "500.000" could mean 500 or 500,000. */
     const btuIn = b.inputBtuh.value.trim();
     if (btuIn){
-      if (/[.]/.test(btuIn)){ toast("Input rating must be a whole number of BTU/h — no decimal point. Write 500000 or 500,000 (not 500.000).","bad"); return; }
+      if (/^\d[\d, ]*\.\d+$/.test(btuIn)){ toast("Input rating must be a whole number of BTU/h — no decimal point. Write 500000 or 500,000 (not 500.000).","bad"); return; }
       if (!BTU_NUM.test(btuIn)){ toast("Input rating must be a whole number of BTU/h, e.g. 60000 or 60,000.","bad"); return; }
       const n = Number(btuIn.replace(/[, ]/g,""));
-      if (!Number.isSafeInteger(n) || n<BTU_MIN){ toast("Input rating under 1,000 BTU/h is not a real appliance rating — check the units on the rating plate (BTU/h, not MBH).","bad"); return; }
+      if (!Number.isSafeInteger(n)){ toast("That number is too large — check the rating plate.","bad"); return; }
+      if (n<BTU_MIN){ toast("Input rating under 1,000 BTU/h is not a real appliance rating — check the units on the rating plate (BTU/h, not MBH).","bad"); return; }
       data.inputBtuh = n;
     }
     else data.inputBtuh = null;
@@ -2737,7 +2850,27 @@ function equipmentForm(e, presetCustomer){
     const dup = S.equipment.find(x=>x.serial && String(x.serial).toLowerCase()===data.serial.toLowerCase() && x.id!==e?.id);
     /* confirmBox stacks over this form, so Cancel returns to the filled-in form. */
     if (dup && !(await confirmBox("Serial already on file", `${equipmentLabel(dup)} already uses serial ${dup.serial}. Save anyway?`, "Save anyway"))) return;
-    if (editing){ if (!(await writeDoc("equipment/"+e.id, data, true))) return; Object.assign(e, data); closeOverlay(); toast("Equipment updated."); render(); return; }
+    if (editing){
+      /* A change of the input rating is logged on the equipment (old → new, who, when). If the equipment has an open red tag,
+         it also goes on that job's timeline and managers are told — the rating decides who may remove the tag. */
+      if (!(await freshEquipment(e.id))){ return; }
+      const before = ratingText(e), after = ratingText(Object.assign({}, e, data));
+      let change = null;
+      if (before!==after){
+        change = {from:before, to:after, fromRaw:rawRating(e), toRaw:data.inputBtuh, by:me()?.name||ROLE_LABELS[S.role], byId:S.userId||null, at:now()};
+        data.ratingChanges = (Array.isArray(e.ratingChanges) ? e.ratingChanges : []).concat([change]);
+      }
+      if (!(await writeDoc("equipment/"+e.id, data, true))) return;
+      Object.assign(e, data);
+      if (change){
+        await freshHazards({quiet:true, noRender:true});
+        const open = openHazards(h=>ruleEquipmentId(h)===e.id);
+        const note = `Input rating of ${equipmentLabel(e)} changed: ${change.from} → ${change.to} (while a red tag is open)`;
+        for (const jid of new Set(open.map(h=>h.jobId).filter(x=>x && jobById(x)))) await logEvent(jid, "equipment", {note, equipmentId:e.id});
+        if (open.length){ const jid = open.map(h=>h.jobId).find(x=>x && jobById(x)); await notify(`Input rating of red-tagged ${equipmentLabel(e)} changed: ${change.from} → ${change.to} by ${change.by}.`, jid?{toRole:"managers", jobId:jid}:{toRole:"managers"}); }
+      }
+      closeOverlay(); toast("Equipment updated."); render(); return;
+    }
     const id = uid("eq"); const rec = Object.assign(data, {qrStatus:"not_active", createdAt:now()});
     if (!(await writeDoc("equipment/"+id, rec))) return;
     S.equipment.push(Object.assign({id}, rec));
@@ -2761,12 +2894,12 @@ function renderEquipmentDetail(id){
     <div><div class="k">Customer</div><div class="v">${c?(isField()||S.role==="accountant"?esc(c.name):`<a href="#" id="cl">${esc(c.name)}</a>`):"—"}</div></div>
     <div><div class="k">Address</div><div class="v">${esc(c?.address||"—")}</div></div>
     <div><div class="k">Age</div><div class="v">${esc(equipmentAge(e))}</div></div>
-    <div><div class="k">Input rating</div><div class="v">${btuhRecorded(e) && equipmentBtuh(e)===null?`${esc(String(e.inputBtuh??e.input??""))} <span class="hint" style="color:var(--bad)">(rating can't be read — check the rating plate)</span>`:Number(e.inputBtuh)>0?esc(Number(e.inputBtuh).toLocaleString())+" BTU/h":e.input?esc(e.input)+` <span class="hint">(text only — enter the number in Edit)</span>`:"Not recorded"}</div></div>
+    <div><div class="k">Input rating</div><div class="v">${!btuhRecorded(e)?"Not recorded":equipmentBtuh(e)===null?`${esc(rawRating(e))} <span class="hint" style="color:var(--bad)">(rating can't be read — check the rating plate)</span>`:esc(btuText(equipmentBtuh(e)))+(String(e.inputBtuh??"").trim()===""?` <span class="hint">(from the text “${esc(rawRating(e))}” — enter the number in Edit)</span>`:"")}</div></div>
     <div><div class="k">Refrigerant</div><div class="v">${esc(e.refrigerant||"—")}</div></div>
     <div><div class="k">Filter size</div><div class="v mono">${esc(e.filterSize||"—")}</div></div>
-    <div><div class="k">Warranty</div><div class="v">${e.warrantyUntil?(ts(e.warrantyUntil)>Date.now()?"Until "+esc(fmtDateOnly(e.warrantyUntil)):"Expired "+esc(fmtDateOnly(e.warrantyUntil))):"—"}</div></div>
-    <div><div class="k">Last service</div><div class="v">${ls?esc(fmtDateOnly(ls.closedAt||ls.scheduledAt)):"None on file"}</div></div>
-    <div><div class="k">Yearly maintenance</div><div class="v">${md?(md.overdue?`<span style="color:var(--warn)">Due since ${esc(fmtDateOnly(md.due))}</span>`:"Next by "+esc(fmtDateOnly(md.due))):"—"}</div></div>
+    <div><div class="k">Warranty</div><div class="v">${e.warrantyUntil && badDate(e.warrantyUntil)?esc(BAD_DATE_TXT):e.warrantyUntil?(ts(e.warrantyUntil)>Date.now()?"Until "+esc(fmtDateOnly(e.warrantyUntil)):"Expired "+esc(fmtDateOnly(e.warrantyUntil))):"—"}</div></div>
+    <div><div class="k">Last service</div><div class="v">${ls?esc(fmtDateOnly(doneAt(ls))):"None on file"}</div></div>
+    <div><div class="k">Yearly maintenance</div><div class="v">${md?.unreadable?`<span style="color:var(--warn)">Date can't be read — check the ${esc(md.basis)}</span>`:md?(md.overdue?`<span style="color:var(--warn)">Due since ${esc(fmtDateOnly(md.due))}</span>`:"Next by "+esc(fmtDateOnly(md.due))):"—"}</div></div>
   </div>${e.notes?`<div class="note mt">${esc(e.notes)}</div>`:""}</div>`));
   $("#cl", g)?.addEventListener("click", ev=>{ ev.preventDefault(); openCustomer(c.id); });
   const hist = el(`<div class="card"><div class="card-h"><h3>Service history</h3></div></div>`);
@@ -3002,14 +3135,14 @@ function renderExpenses(){
 function renderReports(){
   const wrap = el(`<div><div class="pagehead"><div><h1>Reports</h1><div class="sub">Calculated live from your job records. Nothing estimated.</div></div></div></div>`);
   const closed = S.jobs.filter(isClosed);
-  const durations = closed.filter(j=>j.closedAt && j.createdAt).map(j=>(ts(j.closedAt)-ts(j.createdAt))/3600000);
+  const durations = closed.filter(j=>j.closedAt && j.createdAt).map(j=>(ts(j.closedAt)-ts(j.createdAt))/3600000).filter(Number.isFinite);
   const avgH = durations.length ? (durations.reduce((a,b)=>a+b,0)/durations.length) : null;
   const reviewed = S.jobs.filter(j=>j.review); const sentBackJobs = S.jobs.filter(j=>(j.sendBacks||0)>0);
   const firstPass = reviewed.length ? Math.round((reviewed.length - sentBackJobs.filter(j=>j.review).length)/reviewed.length*100) : null;
   const approvedSpend = allExpenses().filter(x=>x.item.status==="approved").reduce((n,x)=>n+lineTotal(x.item),0);
   wrap.appendChild(el(`<div class="grid g4">${kpi("Jobs closed", closed.length, "checkcircle")}${kpi("Avg. created → closed", avgH===null?"—":(avgH<48?avgH.toFixed(1)+" h":(avgH/24).toFixed(1)+" d"), "clock", durations.length+" job(s) measured")}${kpi("Passed review first time", firstPass===null?"—":firstPass+"%", "clipboard", reviewed.length+" reviewed")}${kpi("Approved expenses", money(approvedSpend), "receipt")}</div>`));
   const weeks = []; const start = new Date(); start.setHours(0,0,0,0); start.setDate(start.getDate()-start.getDay());
-  for (let i=7;i>=0;i--){ const a = ts(start.toISOString())-i*7*DAY, b = a+7*DAY; weeks.push({l:new Date(a).toLocaleDateString(undefined,{month:"short",day:"numeric"}), n:closed.filter(j=>{ const t = ts(j.closedAt||j.scheduledAt); return t>=a && t<b; }).length}); }
+  for (let i=7;i>=0;i--){ const a = ts(start.toISOString())-i*7*DAY, b = a+7*DAY; weeks.push({l:new Date(a).toLocaleDateString(undefined,{month:"short",day:"numeric"}), n:closed.filter(j=>{ const t = ts(doneAt(j)); return t>=a && t<b; }).length}); }
   const max = Math.max(1, ...weeks.map(w=>w.n));
   const g = el(`<div class="grid g2 mt2"><div class="card"><div class="card-h"><h3>Jobs closed per week</h3><span class="hint">last 8 weeks</span></div><div class="bars">${weeks.map(w=>`<div class="b"><span class="n">${w.n}</span><div class="v" style="height:${w.n/max*100}%"></div><span class="l">${esc(w.l)}</span></div>`).join("")}</div></div>
     <div class="card"><div class="card-h"><h3>Closed jobs by technician</h3></div><div id="bt"></div></div>
@@ -3158,6 +3291,7 @@ function auditRows(){
     s.help.filter(h=>h.resolvedAt).forEach(h=>rows.push({at:h.resolvedAt, by:h.resolvedBy, what:`${j.refNumber}: answered help request`}));
   });
   S.consent.filter(c=>c.type==="qr_activation").forEach(c=>rows.push({at:c.at, by:c.by||"—", what:`QR ${c.result} · ${equipmentLabel(equipmentById(c.equipmentId))}${c.signedName?" · signed by "+c.signedName:""}`}));
+  S.equipment.forEach(e=>{ if (Array.isArray(e.ratingChanges)) e.ratingChanges.filter(c=>c && typeof c==="object").forEach(c=>rows.push({at:c.at, by:c.by, what:`Input rating changed · ${equipmentLabel(e)}: ${c.from||"?"} → ${c.to||"?"}`})); });
   S.hazards.forEach(h=>{ rows.push({at:h.at, by:h.by, what:`Red tag opened · ${equipmentLabel(equipmentById(h.equipmentId))}: ${h.description}`}); if (h.resolvedAt) rows.push({at:h.resolvedAt, by:h.clearRecordedBy||h.resolvedBy, what:`Red tag removed by ${h.resolvedBy||"—"} · ${h.correctiveAction||h.resolution||""}`}); });
   return rows.sort((a,b)=>ts(b.at)-ts(a.at));
 }
